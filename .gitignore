@@ -1,0 +1,16 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environment
+.venv/
+venv/
+backend/venv/
+backend/.venv/
+
+# Environment files
+.env
+
+# Node
+node_modules/
+dist/
