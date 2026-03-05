@@ -1,809 +1,278 @@
-// import { useState } from 'react';
-// import { Link, useNavigate } from 'react-router-dom';
-// import { Mail, Lock, Eye, EyeOff, User, GraduationCap, Briefcase } from 'lucide-react';
-// import { useAuth } from '../../context/AuthContext';
-// import { Button } from '../../components/ui/Button';
-// import { Input } from '../../components/ui/Input';
-// import { toast } from 'sonner';
+import { useState, useEffect, useContext } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { supabase } from '../../supabaseClient';
+import { AuthContext } from '../../context/AuthContext';
 
-// export default function SignupPage() {
-//   const navigate = useNavigate();
-//   const { signup, isAuthenticated, user } = useAuth();
+const SLIDES = [
+  {
+    img:     'https://images.unsplash.com/photo-1427504494785-3a9ca7044f45?auto=format&fit=crop&w=1200&q=80',
+    alt:     'Student writing exam answers at a desk',
+    tag:     'For Students',
+    title:   'Submit. Learn.\nImprove.',
+    caption: 'Take assessments, get instant AI-generated feedback, and track how your scores evolve over time.',
+  },
+  {
+    img:     'https://images.unsplash.com/photo-1524178232363-1fb2b075b655?auto=format&fit=crop&w=1200&q=80',
+    alt:     'Lecturer presenting at the front of a classroom',
+    tag:     'For Lecturers',
+    title:   'Build. Publish.\nGrade at scale.',
+    caption: 'Create assessments, share access codes, and let AI handle the grading while you focus on teaching.',
+  },
+  {
+    img:     'https://images.unsplash.com/photo-1513258496099-48168024aec0?auto=format&fit=crop&w=1200&q=80',
+    alt:     'University students collaborating over laptops',
+    tag:     'Free to join',
+    title:   'Get started\nin minutes.',
+    caption: 'No credit card, no setup hassle. Create your account and you\'re ready from day one.',
+  },
+];
 
-//   const [formData, setFormData] = useState({
-//     email: '',
-//     username: '',
-//     password: '',
-//     confirmPassword: '',
-//     full_name: '',
-//     role: 'student',
-//     student_id: '',
-//     terms_accepted: false,
-//   });
+const ROLES = [
+  { value: 'student',  icon: '🎓', label: 'Student' },
+  { value: 'lecturer', icon: '📚', label: 'Lecturer' },
+];
 
-//   const [showPassword, setShowPassword] = useState(false);
-//   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-//   const [loading, setLoading] = useState(false);
+function passwordStrength(pw) {
+  if (!pw) return { score: 0, label: '', color: '' };
+  let score = 0;
+  if (pw.length >= 8)           score++;
+  if (/[A-Z]/.test(pw))         score++;
+  if (/[0-9]/.test(pw))         score++;
+  if (/[^A-Za-z0-9]/.test(pw))  score++;
+  return { score, ...[
+    { label: 'Too short', color: '#ef4444' },
+    { label: 'Weak',      color: '#f97316' },
+    { label: 'Fair',      color: '#eab308' },
+    { label: 'Good',      color: '#22c55e' },
+    { label: 'Strong',    color: '#111827' },
+  ][score] };
+}
 
-//   // Redirect if already logged in
-//   if (isAuthenticated && user) {
-//     const path = user.role === 'student' ? '/student/dashboard' : '/lecturer/dashboard';
-//     navigate(path, { replace: true });
-//     return null;
-//   }
-
-//   const handleSubmit = async (e) => {
-//     e.preventDefault();
-
-//     // Validation
-//     if (formData.password !== formData.confirmPassword) {
-//       toast.error('Passwords do not match');
-//       return;
-//     }
-
-//     if (formData.password.length < 8) {
-//       toast.error('Password must be at least 8 characters');
-//       return;
-//     }
-
-//     if (!formData.terms_accepted) {
-//       toast.error('Please accept the terms and conditions');
-//       return;
-//     }
-
-//     setLoading(true);
-
-//     try {
-//       const userData = {
-//         email: formData.email,
-//         username: formData.username,
-//         password: formData.password,
-//         full_name: formData.full_name,
-//         role: formData.role,
-//         student_id: formData.student_id || null,
-//       };
-
-//       const response = await signup(userData);
-
-//       toast.success('Account created successfully! 🎉');
-
-//       // Navigate based on role
-//       const path = response.user.role === 'student'
-//         ? '/student/dashboard'
-//         : '/lecturer/dashboard';
-//       navigate(path, { replace: true });
-
-//     } catch (error) {
-//       const message = error.response?.data?.detail || 'Failed to create account';
-//       toast.error(message);
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
-
-//   const handleChange = (e) => {
-//     const { name, value, type, checked } = e.target;
-//     setFormData(prev => ({
-//       ...prev,
-//       [name]: type === 'checkbox' ? checked : value,
-//     }));
-//   };
-
-//   return (
-//     <div className="min-h-screen flex items-center justify-center p-8 bg-gray-50">
-//       <div className="w-full max-w-md">
-//         {/* Header */}
-//         <div className="text-center mb-8">
-//           <h1 className="text-3xl font-bold bg-gradient-to-r from-brand-600 to-brand-800 bg-clip-text text-transparent mb-2">
-//             EvalAI
-//           </h1>
-//           <h2 className="text-2xl font-bold text-gray-900">Create your account</h2>
-//           <p className="mt-2 text-sm text-gray-600">
-//             Start your journey with AI-powered assessments
-//           </p>
-//         </div>
-
-//         {/* Signup form */}
-//         <form onSubmit={handleSubmit} className="space-y-5 bg-white p-8 rounded-2xl shadow-sm border border-gray-200">
-//           {/* Role selection */}
-//           <div>
-//             <label className="block text-sm font-medium text-gray-700 mb-2">
-//               I am a
-//             </label>
-//             <div className="grid grid-cols-2 gap-3">
-//               <button
-//                 type="button"
-//                 onClick={() => setFormData(prev => ({ ...prev, role: 'student' }))}
-//                 className={`flex items-center justify-center gap-2 p-3 rounded-lg border-2 transition-all ${
-//                   formData.role === 'student'
-//                     ? 'border-brand-600 bg-brand-50 text-brand-700'
-//                     : 'border-gray-200 hover:border-gray-300'
-//                 }`}
-//               >
-//                 <GraduationCap className="w-5 h-5" />
-//                 <span className="font-medium">Student</span>
-//               </button>
-//               <button
-//                 type="button"
-//                 onClick={() => setFormData(prev => ({ ...prev, role: 'lecturer' }))}
-//                 className={`flex items-center justify-center gap-2 p-3 rounded-lg border-2 transition-all ${
-//                   formData.role === 'lecturer'
-//                     ? 'border-brand-600 bg-brand-50 text-brand-700'
-//                     : 'border-gray-200 hover:border-gray-300'
-//                 }`}
-//               >
-//                 <Briefcase className="w-5 h-5" />
-//                 <span className="font-medium">Lecturer</span>
-//               </button>
-//             </div>
-//           </div>
-
-//           {/* Full name */}
-//           <Input
-//             label="Full name"
-//             type="text"
-//             name="full_name"
-//             value={formData.full_name}
-//             onChange={handleChange}
-//             icon={User}
-//             placeholder="John Doe"
-//             required
-//           />
-
-//           {/* Email */}
-//           <Input
-//             label="Email address"
-//             type="email"
-//             name="email"
-//             value={formData.email}
-//             onChange={handleChange}
-//             icon={Mail}
-//             placeholder="you@example.com"
-//             required
-//             autoComplete="email"
-//           />
-
-//           {/* Username */}
-//           <Input
-//             label="Username"
-//             type="text"
-//             name="username"
-//             value={formData.username}
-//             onChange={handleChange}
-//             icon={User}
-//             placeholder="johndoe"
-//             required
-//             autoComplete="username"
-//           />
-
-//           {/* Student ID (if student) */}
-//           {formData.role === 'student' && (
-//             <Input
-//               label="Student ID (optional)"
-//               type="text"
-//               name="student_id"
-//               value={formData.student_id}
-//               onChange={handleChange}
-//               placeholder="S12345"
-//             />
-//           )}
-
-//           {/* Password */}
-//           <div>
-//             <label className="block text-sm font-medium text-gray-700 mb-1">
-//               Password
-//             </label>
-//             <div className="relative">
-//               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-//                 <Lock className="h-5 w-5 text-gray-400" />
-//               </div>
-//               <input
-//                 type={showPassword ? 'text' : 'password'}
-//                 name="password"
-//                 value={formData.password}
-//                 onChange={handleChange}
-//                 className="block w-full pl-10 pr-10 rounded-lg border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500"
-//                 placeholder="••••••••"
-//                 required
-//                 autoComplete="new-password"
-//               />
-//               <button
-//                 type="button"
-//                 onClick={() => setShowPassword(!showPassword)}
-//                 className="absolute inset-y-0 right-0 pr-3 flex items-center"
-//               >
-//                 {showPassword ? (
-//                   <EyeOff className="h-5 w-5 text-gray-400 hover:text-gray-600" />
-//                 ) : (
-//                   <Eye className="h-5 w-5 text-gray-400 hover:text-gray-600" />
-//                 )}
-//               </button>
-//             </div>
-//             <p className="mt-1 text-xs text-gray-500">
-//               At least 8 characters
-//             </p>
-//           </div>
-
-//           {/* Confirm Password */}
-//           <div>
-//             <label className="block text-sm font-medium text-gray-700 mb-1">
-//               Confirm password
-//             </label>
-//             <div className="relative">
-//               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-//                 <Lock className="h-5 w-5 text-gray-400" />
-//               </div>
-//               <input
-//                 type={showConfirmPassword ? 'text' : 'password'}
-//                 name="confirmPassword"
-//                 value={formData.confirmPassword}
-//                 onChange={handleChange}
-//                 className="block w-full pl-10 pr-10 rounded-lg border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500"
-//                 placeholder="••••••••"
-//                 required
-//                 autoComplete="new-password"
-//               />
-//               <button
-//                 type="button"
-//                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-//                 className="absolute inset-y-0 right-0 pr-3 flex items-center"
-//               >
-//                 {showConfirmPassword ? (
-//                   <EyeOff className="h-5 w-5 text-gray-400 hover:text-gray-600" />
-//                 ) : (
-//                   <Eye className="h-5 w-5 text-gray-400 hover:text-gray-600" />
-//                 )}
-//               </button>
-//             </div>
-//           </div>
-
-//           {/* Terms */}
-//           <label className="flex items-start">
-//             <input
-//               type="checkbox"
-//               name="terms_accepted"
-//               checked={formData.terms_accepted}
-//               onChange={handleChange}
-//               className="h-4 w-4 text-brand-600 focus:ring-brand-500 border-gray-300 rounded mt-0.5"
-//             />
-//             <span className="ml-2 text-sm text-gray-700">
-//               I agree to the{' '}
-//               <a href="#" className="text-brand-600 hover:text-brand-500">
-//                 Terms and Conditions
-//               </a>{' '}
-//               and{' '}
-//               <a href="#" className="text-brand-600 hover:text-brand-500">
-//                 Privacy Policy
-//               </a>
-//             </span>
-//           </label>
-
-//           {/* Submit button */}
-//           <Button
-//             type="submit"
-//             variant="primary"
-//             className="w-full"
-//             loading={loading}
-//           >
-//             Create account
-//           </Button>
-//         </form>
-
-//         {/* Sign in link */}
-//         <p className="mt-6 text-center text-sm text-gray-600">
-//           Already have an account?{' '}
-//           <Link
-//             to="/login"
-//             className="font-medium text-brand-600 hover:text-brand-500"
-//           >
-//             Sign in
-//           </Link>
-//         </p>
-//       </div>
-//     </div>
-//   );
-// }
-
-// src/pages/auth/SignupPage.jsx
-// Modern multi-step signup — clean, minimal, confident
-
-import { useState, useRef, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  GraduationCap,
-  Briefcase,
-  ArrowRight,
-  ArrowLeft,
-  Eye,
-  EyeOff,
-  Check,
-  Mail,
-  Lock,
-  User,
-  Hash,
-} from "lucide-react";
-import { useAuth } from "../../context/AuthContext";
-import { toast } from "sonner";
-
-const STEP_COUNT = 3;
-
-export default function Signup() {
-  const navigate = useNavigate();
-  const { signup, isAuthenticated, user } = useAuth();
-  const hasRedirected = useRef(false);
-  const [step, setStep] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [showPw, setShowPw] = useState(false);
-  const [form, setForm] = useState({
-    role: "",
-    full_name: "",
-    email: "",
-    username: "",
-    student_id: "",
-    password: "",
-    confirmPassword: "",
-  });
-
-  const set = (field, value) =>
-    setForm((prev) => ({ ...prev, [field]: value }));
-  const handle = (e) => set(e.target.name, e.target.value);
-
-  // Validation per step
-  const canAdvance = () => {
-    if (step === 1) return !!form.role;
-    if (step === 2)
-      return (
-        form.full_name.trim() &&
-        form.email.includes("@") &&
-        form.username.trim().length >= 3
-      );
-    if (step === 3)
-      return (
-        form.password.length >= 8 && form.password === form.confirmPassword
-      );
-    return false;
-  };
-
-  const next = () => {
-    if (canAdvance()) setStep((s) => Math.min(s + 1, STEP_COUNT));
-  };
-  const back = () => setStep((s) => Math.max(s - 1, 1));
+function LeftPanel() {
+  const [idx,     setIdx]     = useState(0);
+  const [visible, setVisible] = useState(true);
 
   useEffect(() => {
-    if (isAuthenticated && user && !hasRedirected.current) {
-      hasRedirected.current = true;
-      navigate(
-        user.role === "student" ? "/student/dashboard" : "/lecturer/dashboard",
-        { replace: true },
-      );
-    }
-  }, [isAuthenticated, user, navigate]);
+    const interval = setInterval(() => {
+      setVisible(false);
+      setTimeout(() => { setIdx(i => (i + 1) % SLIDES.length); setVisible(true); }, 400);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
-  const handleSubmit = async () => {
-  setLoading(true);
-  try {
-    const response = await signup({ ...form });
-    toast.success('Account created! Welcome 🎉');
-    hasRedirected.current = true;
-    const path = response.user.role === 'student' ? '/student/dashboard' : '/lecturer/dashboard';
-    navigate(path, { replace: true });
-  } catch (error) {
-    toast.error(error?.response?.data?.detail || 'Failed to create account');
-  } finally {
-    setLoading(false);
-  }
-};
+  const slide = SLIDES[idx];
 
   return (
-    <div className="min-h-screen bg-[#fafaf9] flex">
-      {/* Left brand strip */}
-      <div className="hidden lg:flex w-[420px] flex-shrink-0 bg-gray-950 flex-col justify-between p-10 relative overflow-hidden">
-        {/* subtle grid texture */}
-        <div
-          className="absolute inset-0 opacity-[0.04]"
-          style={{
-            backgroundImage:
-              "linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)",
-            backgroundSize: "40px 40px",
-          }}
-        />
+    <div className="hidden lg:block w-[520px] shrink-0 relative overflow-hidden">
+      {SLIDES.map((s, i) => (
+        <img key={s.img} src={s.img} alt={s.alt}
+          className="absolute inset-0 w-full h-full object-cover transition-opacity duration-700"
+          style={{ opacity: i === idx ? 1 : 0 }} />
+      ))}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-black/20" />
 
-        <div className="relative z-10">
-          <div className="flex items-center gap-2.5 mb-16">
-            <div className="w-8 h-8 bg-brand-600 rounded-lg flex items-center justify-center">
-              <GraduationCap className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-white font-bold text-lg tracking-tight">
-              EvalAI
-            </span>
+      <div className="absolute top-10 left-10 z-10">
+        <Link to="/" className="inline-flex items-center gap-2.5">
+          <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#111" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+            </svg>
           </div>
-
-          <h2 className="text-3xl font-bold text-white leading-snug mb-4">
-            AI grading that understands meaning, not just keywords.
-          </h2>
-          <p className="text-gray-400 text-sm leading-relaxed">
-            Designed for universities that value fair, consistent, and instant
-            assessment feedback.
-          </p>
-        </div>
-
-        {/* Step indicator on left side */}
-        <div className="relative z-10 space-y-3">
-          {["Choose your role", "Your details", "Set a password"].map(
-            (label, i) => (
-              <div
-                key={i}
-                className={`flex items-center gap-3 transition-opacity duration-300 ${step > i + 1 ? "opacity-40" : step === i + 1 ? "opacity-100" : "opacity-30"}`}
-              >
-                <div
-                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 transition-colors ${step > i + 1 ? "bg-green-500 text-white" : step === i + 1 ? "bg-brand-600 text-white" : "border border-gray-600 text-gray-600"}`}
-                >
-                  {step > i + 1 ? <Check className="w-3.5 h-3.5" /> : i + 1}
-                </div>
-                <span
-                  className={`text-sm ${step === i + 1 ? "text-white font-medium" : "text-gray-500"}`}
-                >
-                  {label}
-                </span>
-              </div>
-            ),
-          )}
-        </div>
+          <span className="text-white font-semibold text-base tracking-tight">EvalAI</span>
+        </Link>
       </div>
 
-      {/* Right content area */}
-      <div className="flex-1 flex flex-col items-center justify-center p-8">
-        <div className="w-full max-w-md">
-          {/* Mobile logo */}
-          <div className="lg:hidden flex items-center gap-2 mb-8">
-            <div className="w-8 h-8 bg-brand-600 rounded-lg flex items-center justify-center">
-              <GraduationCap className="w-5 h-5 text-white" />
-            </div>
-            <span className="font-bold text-gray-900 text-lg">EvalAI</span>
-          </div>
+      <div className="absolute bottom-0 left-0 right-0 p-10 z-10">
+        <div style={{
+          opacity:    visible ? 1 : 0,
+          transform:  visible ? 'translateY(0)' : 'translateY(10px)',
+          transition: 'opacity 0.4s ease, transform 0.4s ease',
+        }}>
+          <span className="inline-block text-[10px] font-bold text-white/60 uppercase tracking-[0.2em] mb-3">{slide.tag}</span>
+          <h2 className="text-[26px] font-bold text-white leading-tight whitespace-pre-line mb-3">{slide.title}</h2>
+          <p className="text-[14px] text-white/70 leading-relaxed max-w-[320px]">{slide.caption}</p>
+        </div>
+        <div className="flex items-center gap-2 mt-6">
+          {SLIDES.map((_, i) => (
+            <button key={i}
+              onClick={() => { setVisible(false); setTimeout(() => { setIdx(i); setVisible(true); }, 400); }}
+              className="rounded-full bg-white transition-all duration-300"
+              style={{ width: i === idx ? '22px' : '6px', height: '6px', opacity: i === idx ? 1 : 0.35 }} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
-          {/* Mobile step dots */}
-          <div className="lg:hidden flex items-center gap-2 mb-6">
-            {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className={`h-1.5 rounded-full transition-all duration-300 ${i === step ? "w-8 bg-brand-600" : i < step ? "w-4 bg-brand-300" : "w-4 bg-gray-200"}`}
-              />
-            ))}
-          </div>
+export default function Signup() {
+  const { setUser } = useContext(AuthContext);
+  const navigate    = useNavigate();
 
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={step}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.2 }}
-            >
-              {/* Step 1: Role */}
-              {step === 1 && (
+  const [fullName,        setFullName]        = useState('');
+  const [email,           setEmail]           = useState('');
+  const [role,            setRole]            = useState('student');
+  const [password,        setPassword]        = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPass,        setShowPass]        = useState(false);
+  const [agreedToTerms,   setAgreedToTerms]   = useState(false);
+  const [error,           setError]           = useState('');
+  const [success,         setSuccess]         = useState('');
+  const [loading,         setLoading]         = useState(false);
+
+  const strength = passwordStrength(password);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(''); setSuccess('');
+    if (password !== confirmPassword) return setError('Passwords do not match.');
+    if (password.length < 8)         return setError('Password must be at least 8 characters.');
+    if (!agreedToTerms)              return setError('You must agree to the Terms of Service.');
+    setLoading(true);
+    const { data, error: signUpError } = await supabase.auth.signUp({
+      email, password, options: { data: { full_name: fullName, role } },
+    });
+    setLoading(false);
+    if (signUpError) return setError(signUpError.message);
+    if (data.session) {
+      setUser({ id: data.user.id, email, fullName, role, isAuthenticated: true });
+      navigate(role === 'lecturer' ? '/lecturer' : '/student');
+    } else {
+      setSuccess('Check your email and click the verification link to activate your account.');
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex bg-white" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+      <LeftPanel />
+
+      <div className="flex-1 flex flex-col">
+        <div className="flex items-center justify-between px-8 py-5 border-b border-gray-100">
+          <Link to="/" className="lg:hidden font-bold text-gray-900">EvalAI</Link>
+          <div className="ml-auto text-sm text-gray-500">
+            Already have an account?{' '}
+            <Link to="/login" className="text-gray-900 font-semibold hover:underline underline-offset-2">Sign in</Link>
+          </div>
+        </div>
+
+        <div className="flex-1 flex items-center justify-center px-8 py-10 overflow-y-auto">
+          <div className="w-full max-w-[400px]">
+            {success ? (
+              <div className="text-center space-y-5">
+                <div className="w-14 h-14 rounded-full border-2 border-gray-200 flex items-center justify-center mx-auto text-2xl">✉️</div>
                 <div>
-                  <p className="text-xs font-semibold text-brand-600 uppercase tracking-widest mb-2">
-                    Step 1 of 3
-                  </p>
-                  <h1 className="text-2xl font-bold text-gray-900 mb-1">
-                    I am joining as…
-                  </h1>
-                  <p className="text-gray-500 text-sm mb-8">
-                    Your role determines what features you'll see.
-                  </p>
-
-                  <div className="space-y-3">
-                    {[
-                      {
-                        value: "student",
-                        Icon: GraduationCap,
-                        title: "Student",
-                        sub: "Take assessments, view feedback & track progress",
-                      },
-                      {
-                        value: "lecturer",
-                        Icon: Briefcase,
-                        title: "Lecturer",
-                        sub: "Create assessments, grade submissions & view analytics",
-                      },
-                      // eslint-disable-next-line no-unused-vars
-                    ].map(({ value, Icon, title, sub }) => (
-                      <button
-                        key={value}
-                        onClick={() => set("role", value)}
-                        className={`w-full flex items-start gap-4 p-5 rounded-2xl border-2 text-left transition-all duration-200 ${
-                          form.role === value
-                            ? "border-brand-600 bg-brand-50"
-                            : "border-gray-200 bg-white hover:border-gray-300"
-                        }`}
-                      >
-                        <div
-                          className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${form.role === value ? "bg-brand-600 text-white" : "bg-gray-100 text-gray-500"}`}
-                        >
-                          <Icon className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <p
-                            className={`font-semibold ${form.role === value ? "text-brand-700" : "text-gray-900"}`}
-                          >
-                            {title}
-                          </p>
-                          <p className="text-sm text-gray-500 mt-0.5">{sub}</p>
-                        </div>
-                        {form.role === value && (
-                          <div className="ml-auto flex-shrink-0 w-5 h-5 bg-brand-600 rounded-full flex items-center justify-center">
-                            <Check className="w-3 h-3 text-white" />
-                          </div>
-                        )}
-                      </button>
-                    ))}
-                  </div>
+                  <h2 className="text-xl font-bold text-gray-900 mb-2">Check your inbox</h2>
+                  <p className="text-sm text-gray-500 leading-relaxed">{success}</p>
                 </div>
-              )}
+                <button onClick={() => navigate('/login')}
+                  className="w-full py-3 rounded-xl text-sm font-bold bg-gray-950 text-white hover:bg-gray-800 transition-all">
+                  Go to Sign In →
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="mb-7">
+                  <h1 className="text-2xl font-bold text-gray-900 mb-1.5">Create your account</h1>
+                  <p className="text-sm text-gray-400">Free to get started — no card required</p>
+                </div>
 
-              {/* Step 2: Details */}
-              {step === 2 && (
-                <div>
-                  <p className="text-xs font-semibold text-brand-600 uppercase tracking-widest mb-2">
-                    Step 2 of 3
-                  </p>
-                  <h1 className="text-2xl font-bold text-gray-900 mb-1">
-                    Your details
-                  </h1>
-                  <p className="text-gray-500 text-sm mb-8">
-                    Tell us a bit about yourself.
-                  </p>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  {error && (
+                    <div className="flex items-start gap-2.5 bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-xl">
+                      <span className="shrink-0">⚠</span><span>{error}</span>
+                    </div>
+                  )}
 
-                  <div className="space-y-4">
-                    <Field
-                      label="Full Name"
-                      icon={<User className="w-4 h-4" />}
-                    >
-                      <input
-                        name="full_name"
-                        value={form.full_name}
-                        onChange={handle}
-                        placeholder="e.g. Alice Johnson"
-                        className={inputCls}
-                        autoFocus
-                      />
-                    </Field>
-                    <Field
-                      label="Email Address"
-                      icon={<Mail className="w-4 h-4" />}
-                    >
-                      <input
-                        name="email"
-                        value={form.email}
-                        onChange={handle}
-                        type="email"
-                        placeholder="you@university.edu"
-                        className={inputCls}
-                      />
-                    </Field>
-                    <Field label="Username" icon={<User className="w-4 h-4" />}>
-                      <input
-                        name="username"
-                        value={form.username}
-                        onChange={handle}
-                        placeholder="alicejohnson"
-                        className={inputCls}
-                      />
-                      <p className="text-xs text-gray-400 mt-1">
-                        Minimum 3 characters, used for your public profile.
-                      </p>
-                    </Field>
-                    {form.role === "student" && (
-                      <Field
-                        label="Student ID (optional)"
-                        icon={<Hash className="w-4 h-4" />}
-                      >
-                        <input
-                          name="student_id"
-                          value={form.student_id}
-                          onChange={handle}
-                          placeholder="e.g. S2021001"
-                          className={inputCls}
-                        />
-                      </Field>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">I am a</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {ROLES.map(r => (
+                        <button key={r.value} type="button" onClick={() => setRole(r.value)}
+                          className={`flex items-center gap-2.5 px-3.5 py-3 rounded-xl border text-left transition-all duration-200 ${role === r.value ? 'bg-gray-950 border-gray-950 text-white' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-400 hover:text-gray-800'}`}>
+                          <span>{r.icon}</span>
+                          <span className="text-[13px] font-semibold">{r.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Full Name</label>
+                    <input type="text" value={fullName} onChange={e => setFullName(e.target.value)}
+                      placeholder="Jane Doe" required autoComplete="name"
+                      className="w-full border border-gray-200 hover:border-gray-400 focus:border-gray-900 bg-white text-gray-900 placeholder-gray-300 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-gray-900/10 transition-all" />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Email Address</label>
+                    <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+                      placeholder="you@university.edu" required autoComplete="email"
+                      className="w-full border border-gray-200 hover:border-gray-400 focus:border-gray-900 bg-white text-gray-900 placeholder-gray-300 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-gray-900/10 transition-all" />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Password</label>
+                    <div className="relative">
+                      <input type={showPass ? 'text' : 'password'} value={password}
+                        onChange={e => setPassword(e.target.value)}
+                        placeholder="Min. 8 characters" required autoComplete="new-password"
+                        className="w-full border border-gray-200 hover:border-gray-400 focus:border-gray-900 bg-white text-gray-900 placeholder-gray-300 rounded-xl px-4 py-3 pr-14 text-sm outline-none focus:ring-2 focus:ring-gray-900/10 transition-all" />
+                      <button type="button" onClick={() => setShowPass(v => !v)}
+                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400 hover:text-gray-700 transition uppercase tracking-wide">
+                        {showPass ? 'Hide' : 'Show'}
+                      </button>
+                    </div>
+                    {password && (
+                      <div className="mt-2 space-y-1">
+                        <div className="flex gap-1">
+                          {[1,2,3,4].map(i => (
+                            <div key={i} className="flex-1 h-1 rounded-full transition-all duration-300"
+                              style={{ background: i <= strength.score ? strength.color : '#e5e7eb' }} />
+                          ))}
+                        </div>
+                        <p className="text-[11px] font-medium" style={{ color: strength.color }}>{strength.label}</p>
+                      </div>
                     )}
                   </div>
-                </div>
-              )}
 
-              {/* Step 3: Password */}
-              {step === 3 && (
-                <div>
-                  <p className="text-xs font-semibold text-brand-600 uppercase tracking-widest mb-2">
-                    Step 3 of 3
-                  </p>
-                  <h1 className="text-2xl font-bold text-gray-900 mb-1">
-                    Secure your account
-                  </h1>
-                  <p className="text-gray-500 text-sm mb-8">
-                    Choose a strong password to protect your account.
-                  </p>
-
-                  <div className="space-y-4">
-                    <Field label="Password" icon={<Lock className="w-4 h-4" />}>
-                      <div className="relative">
-                        <input
-                          name="password"
-                          value={form.password}
-                          onChange={handle}
-                          type={showPw ? "text" : "password"}
-                          placeholder="At least 8 characters"
-                          className={`${inputCls} pr-10`}
-                          autoFocus
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPw((p) => !p)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                        >
-                          {showPw ? (
-                            <EyeOff className="w-4 h-4" />
-                          ) : (
-                            <Eye className="w-4 h-4" />
-                          )}
-                        </button>
-                      </div>
-                      {/* Strength bar */}
-                      {form.password && (
-                        <StrengthBar password={form.password} />
-                      )}
-                    </Field>
-
-                    <Field
-                      label="Confirm Password"
-                      icon={<Lock className="w-4 h-4" />}
-                    >
-                      <input
-                        name="confirmPassword"
-                        value={form.confirmPassword}
-                        onChange={handle}
-                        type="password"
-                        placeholder="Repeat your password"
-                        className={`${inputCls} ${form.confirmPassword && form.confirmPassword !== form.password ? "border-red-300" : ""}`}
-                      />
-                      {form.confirmPassword &&
-                        form.confirmPassword !== form.password && (
-                          <p className="text-xs text-red-500 mt-1">
-                            Passwords don't match
-                          </p>
-                        )}
-                    </Field>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Confirm Password</label>
+                    <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
+                      placeholder="Repeat your password" required autoComplete="new-password"
+                      className={`w-full border bg-white text-gray-900 placeholder-gray-300 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-gray-900/10 transition-all ${confirmPassword && confirmPassword !== password ? 'border-red-300' : 'border-gray-200 hover:border-gray-400 focus:border-gray-900'}`} />
+                    {confirmPassword && confirmPassword !== password && (
+                      <p className="text-xs text-red-500 mt-1">Passwords don't match</p>
+                    )}
                   </div>
 
-                  {/* Summary */}
-                  <div className="mt-6 p-4 bg-gray-100 rounded-xl text-sm space-y-1.5">
-                    <p className="font-medium text-gray-700 mb-2">
-                      Account summary
-                    </p>
-                    <p className="text-gray-500">
-                      Role:{" "}
-                      <span className="font-medium text-gray-800 capitalize">
-                        {form.role}
-                      </span>
-                    </p>
-                    <p className="text-gray-500">
-                      Name:{" "}
-                      <span className="font-medium text-gray-800">
-                        {form.full_name}
-                      </span>
-                    </p>
-                    <p className="text-gray-500">
-                      Email:{" "}
-                      <span className="font-medium text-gray-800">
-                        {form.email}
-                      </span>
-                    </p>
-                  </div>
-                </div>
-              )}
-            </motion.div>
-          </AnimatePresence>
+                  <label className="flex items-start gap-3 cursor-pointer group">
+                    <div onClick={() => setAgreedToTerms(v => !v)}
+                      className={`w-4 h-4 mt-0.5 rounded border-2 shrink-0 flex items-center justify-center transition-all ${agreedToTerms ? 'bg-gray-950 border-gray-950' : 'bg-white border-gray-300 group-hover:border-gray-500'}`}>
+                      {agreedToTerms && <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                    </div>
+                    <span className="text-sm text-gray-500 leading-snug">
+                      I agree to the{' '}
+                      <a href="#terms" className="text-gray-800 font-medium hover:underline underline-offset-2">Terms of Service</a>
+                      {' '}and{' '}
+                      <a href="#privacy" className="text-gray-800 font-medium hover:underline underline-offset-2">Privacy Policy</a>
+                    </span>
+                  </label>
 
-          {/* Navigation buttons */}
-          <div className="flex items-center gap-3 mt-8">
-            {step > 1 && (
-              <button
-                onClick={back}
-                className="flex items-center gap-2 px-5 py-3 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
-              >
-                <ArrowLeft className="w-4 h-4" /> Back
-              </button>
-            )}
-
-            {step < STEP_COUNT ? (
-              <button
-                onClick={next}
-                disabled={!canAdvance()}
-                className="flex-1 flex items-center justify-center gap-2 py-3 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-40"
-              >
-                Continue <ArrowRight className="w-4 h-4" />
-              </button>
-            ) : (
-              <button
-                onClick={handleSubmit}
-                disabled={!canAdvance() || loading}
-                className="flex-1 flex items-center justify-center gap-2 py-3 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-40"
-              >
-                {loading ? (
-                  "Creating account…"
-                ) : (
-                  <>
-                    Create Account <Check className="w-4 h-4" />
-                  </>
-                )}
-              </button>
+                  <button type="submit" disabled={loading || !agreedToTerms}
+                    className="w-full py-3 rounded-xl text-sm font-bold bg-gray-950 text-white hover:bg-gray-800 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.99]">
+                    {loading ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Creating account…
+                      </span>
+                    ) : 'Create Account →'}
+                  </button>
+                </form>
+              </>
             )}
           </div>
-
-          <p className="text-center text-sm text-gray-500 mt-6">
-            Already have an account?{" "}
-            <Link
-              to="/login"
-              className="font-semibold text-brand-600 hover:text-brand-700"
-            >
-              Sign in
-            </Link>
-          </p>
         </div>
       </div>
-    </div>
-  );
-}
-
-function StrengthBar({ password }) {
-  let s = 0;
-  if (password.length >= 8) s++;
-  if (/[A-Z]/.test(password)) s++;
-  if (/[0-9]/.test(password)) s++;
-  if (/[^A-Za-z0-9]/.test(password)) s++;
-  const labels = ["", "Weak", "Fair", "Good", "Strong"];
-  const colors = [
-    "",
-    "bg-red-400",
-    "bg-orange-400",
-    "bg-yellow-400",
-    "bg-green-500",
-  ];
-  const textColors = [
-    "",
-    "text-red-500",
-    "text-orange-500",
-    "text-yellow-600",
-    "text-green-600",
-  ];
-  return (
-    <div className="mt-2">
-      <div className="flex gap-1 h-1">
-        {[1, 2, 3, 4].map((i) => (
-          <div
-            key={i}
-            className={`flex-1 rounded-full transition-colors duration-300 ${i <= s ? colors[s] : "bg-gray-200"}`}
-          />
-        ))}
-      </div>
-      <p className={`text-xs mt-1 font-medium ${textColors[s]}`}>{labels[s]}</p>
-    </div>
-  );
-}
-
-const inputCls =
-  "w-full px-4 py-3 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-white transition-all placeholder-gray-400";
-
-function Field({ label, icon, children }) {
-  return (
-    <div>
-      <label className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 mb-1.5">
-        {icon}
-        {label}
-      </label>
-      {children}
     </div>
   );
 }

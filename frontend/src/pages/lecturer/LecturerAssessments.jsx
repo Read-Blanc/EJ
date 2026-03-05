@@ -1,322 +1,336 @@
-import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Plus, Search, FileText, Clock, Users, BarChart3,
-  Edit, Trash2, Eye, ToggleLeft, ToggleRight,
-  BookOpen, AlertCircle, CheckCircle2, Archive,
-  ChevronDown, Filter, Layers,
-} from 'lucide-react';
-import { lecturerApi } from '../../api/endpoints';
-import { Sidebar } from '../../components/layout/Sidebar';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
-import { Button } from '../../components/ui/Button';
-import { Input } from '../../components/ui/Input';
-import { toast } from 'sonner';
+import { useState, useEffect, useCallback, useContext } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { supabase } from '../../supabaseClient';
+import { AuthContext } from '../../context/AuthContext';
 
-const DIFFICULTY_COLORS = {
-  easy:   { badge: 'bg-green-100 text-green-700',  dot: 'bg-green-500' },
-  medium: { badge: 'bg-yellow-100 text-yellow-700', dot: 'bg-yellow-500' },
-  hard:   { badge: 'bg-red-100 text-red-700',       dot: 'bg-red-500' },
-};
+const FILTERS = ['All', 'Draft', 'Active', 'Closed'];
+const BLANK_QUESTION = { text: '', marks: '', answerLength: 'medium', sampleAnswer: '' };
+const BLANK_FORM     = { title: '', topic: '', questions: [{ ...BLANK_QUESTION }] };
 
-const MOCK_ASSESSMENTS = [
-  { id: 1, title: 'Introduction to Neural Networks', subject: 'Artificial Intelligence', total_marks: 100, duration_minutes: 90, difficulty: 'medium', is_active: true, question_count: 10, submission_count: 24, avg_score: 72, created_at: '2025-01-10' },
-  { id: 2, title: 'Database Normalisation Concepts', subject: 'Database Systems', total_marks: 60, duration_minutes: 60, difficulty: 'easy', is_active: true, question_count: 6, submission_count: 31, avg_score: 81, created_at: '2025-01-14' },
-  { id: 3, title: 'Operating System Scheduling', subject: 'Operating Systems', total_marks: 80, duration_minutes: 75, difficulty: 'hard', is_active: false, question_count: 8, submission_count: 18, avg_score: 58, created_at: '2025-01-20' },
-  { id: 4, title: 'HTTP and REST Architecture', subject: 'Web Development', total_marks: 50, duration_minutes: 45, difficulty: 'easy', is_active: true, question_count: 5, submission_count: 0, avg_score: null, created_at: '2025-02-01' },
-];
+function statusClass(s) {
+  return { Active: 'bg-green-100 text-green-700', Draft: 'bg-gray-100 text-gray-500', Closed: 'bg-red-100 text-red-600' }[s] ?? 'bg-gray-100 text-gray-500';
+}
+
+function generateAccessCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const part  = (n) => Array.from({ length: n }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  return `${part(4)}-${part(4)}`;
+}
 
 export default function LecturerAssessments() {
-  const navigate = useNavigate();
-  const [assessments, setAssessments] = useState([]);
-  const [filtered, setFiltered] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [difficultyFilter, setDifficultyFilter] = useState('all');
-  const [deleteModal, setDeleteModal] = useState(null);
-  const [deleting, setDeleting] = useState(false);
+  const { user }  = useContext(AuthContext);
+  const navigate  = useNavigate();
 
-  useEffect(() => { loadAssessments(); }, []);
+  const [assessments,     setAssessments]     = useState([]);
+  const [loading,         setLoading]         = useState(true);
+  const [fetchError,      setFetchError]      = useState('');
+  const [activeFilter,    setActiveFilter]    = useState('All');
+  const [panelOpen,       setPanelOpen]       = useState(false);
+  const [editingId,       setEditingId]       = useState(null);
+  const [form,            setForm]            = useState(BLANK_FORM);
+  const [saving,          setSaving]          = useState(false);
+  const [toast,           setToast]           = useState('');
+  const [copiedId,        setCopiedId]        = useState(null);
+  const [mutating,        setMutating]        = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
-  useEffect(() => {
-    let result = [...assessments];
-    if (searchQuery) result = result.filter(a =>
-      a.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      a.subject.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-    if (statusFilter !== 'all') result = result.filter(a =>
-      statusFilter === 'active' ? a.is_active : !a.is_active
-    );
-    if (difficultyFilter !== 'all') result = result.filter(a => a.difficulty === difficultyFilter);
-    setFiltered(result);
-  }, [assessments, searchQuery, statusFilter, difficultyFilter]);
+  const fetchAssessments = useCallback(async () => {
+    setLoading(true); setFetchError('');
+    const { data, error } = await supabase
+      .from('assessments')
+      .select('id, title, topic, status, access_code, created_at, questions(id, marks)')
+      .eq('created_by', user.id)
+      .order('created_at', { ascending: false });
 
-  const loadAssessments = async () => {
+    if (error) { setFetchError('Failed to load assessments.'); setLoading(false); return; }
+
+    setAssessments((data ?? []).map(a => {
+      const qs = a.questions ?? [];
+      return {
+        id: a.id, title: a.title, topic: a.topic, status: a.status,
+        accessCode: a.access_code,
+        questions: qs.length,
+        maxMarks: qs.reduce((s, q) => s + (q.marks || 0), 0),
+        submissions: 0,
+      };
+    }));
+    setLoading(false);
+  }, [user.id]);
+
+  useEffect(() => { fetchAssessments(); }, [fetchAssessments]);
+
+  const counts = FILTERS.reduce((acc, f) => ({
+    ...acc, [f]: f === 'All' ? assessments.length : assessments.filter(a => a.status === f).length,
+  }), {});
+
+  const visible = activeFilter === 'All' ? assessments : assessments.filter(a => a.status === activeFilter);
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 3500); };
+
+  const openCreatePanel = () => { setForm(BLANK_FORM); setEditingId(null); setPanelOpen(true); };
+
+  const openEditPanel = async (a) => {
+    setEditingId(a.id); setPanelOpen(true);
+    setForm({ title: a.title, topic: a.topic ?? '', questions: [{ ...BLANK_QUESTION }] });
+    const { data } = await supabase.from('questions').select('text, marks, answer_length, sample_answer').eq('assessment_id', a.id).order('order_index');
+    if (!data || data.length === 0) return;
+    setForm(prev => ({
+      ...prev,
+      questions: data.map(q => ({ text: q.text, marks: String(q.marks), answerLength: q.answer_length, sampleAnswer: q.sample_answer || '' })),
+    }));
+  };
+
+  const closePanel = () => { if (saving) return; setPanelOpen(false); setEditingId(null); };
+
+  const setTopField   = (field) => (e) => setForm(prev => ({ ...prev, [field]: e.target.value }));
+  const setQField     = (idx, field) => (e) => setForm(prev => {
+    const qs = [...prev.questions]; qs[idx] = { ...qs[idx], [field]: e.target.value }; return { ...prev, questions: qs };
+  });
+  const addQuestion   = () => setForm(prev => ({ ...prev, questions: [...prev.questions, { ...BLANK_QUESTION }] }));
+  const removeQuestion = (idx) => setForm(prev => ({ ...prev, questions: prev.questions.filter((_, i) => i !== idx) }));
+
+  const saveAssessment = async (status) => {
+    setSaving(true);
     try {
-      setLoading(true);
-      const data = await lecturerApi.getAssessments();
-      setAssessments(data?.length ? data : MOCK_ASSESSMENTS);
-    } catch {
-      setAssessments(MOCK_ASSESSMENTS);
-    } finally {
-      setLoading(false);
-    }
+      let assessmentId;
+      if (editingId) {
+        const updateData = { title: form.title, topic: form.topic, status };
+        if (status === 'Active') updateData.access_code = generateAccessCode();
+        const { error: aErr } = await supabase.from('assessments').update(updateData).eq('id', editingId);
+        if (aErr) throw aErr;
+        await supabase.from('questions').delete().eq('assessment_id', editingId);
+        assessmentId = editingId;
+      } else {
+        const insertData = { title: form.title, topic: form.topic, status, created_by: user.id };
+        if (status === 'Active') insertData.access_code = generateAccessCode();
+        const { data: assessment, error: aErr } = await supabase.from('assessments').insert(insertData).select().single();
+        if (aErr) throw aErr;
+        assessmentId = assessment.id;
+      }
+      const { error: qErr } = await supabase.from('questions').insert(
+        form.questions.map((q, i) => ({
+          assessment_id: assessmentId, order_index: i, text: q.text,
+          marks: parseInt(q.marks, 10) || 0, answer_length: q.answerLength, sample_answer: q.sampleAnswer,
+        }))
+      );
+      if (qErr) throw qErr;
+      closePanel();
+      showToast(editingId ? 'Assessment updated.' : status === 'Draft' ? 'Saved as draft.' : 'Assessment published!');
+      fetchAssessments();
+    } catch { showToast('Something went wrong. Please try again.'); }
+    finally { setSaving(false); }
   };
 
-  const handleToggleStatus = async (assessment) => {
+  const handleClose = async (id) => {
+    setMutating(true);
+    const { error } = await supabase.from('assessments').update({ status: 'Closed' }).eq('id', id);
+    if (error) showToast('Failed to close assessment.'); else { showToast('Assessment closed.'); fetchAssessments(); }
+    setMutating(false);
+  };
+
+  const handleReopen = async (id) => {
+    setMutating(true);
+    const { error } = await supabase.from('assessments').update({ status: 'Active' }).eq('id', id);
+    if (error) showToast('Failed to reopen assessment.'); else { showToast('Assessment reopened.'); fetchAssessments(); }
+    setMutating(false);
+  };
+
+  const handleDelete = async (id) => {
+    setMutating(true);
     try {
-      await lecturerApi.updateAssessment(assessment.id, { is_active: !assessment.is_active });
-      setAssessments(prev => prev.map(a =>
-        a.id === assessment.id ? { ...a, is_active: !a.is_active } : a
-      ));
-      toast.success(`Assessment ${assessment.is_active ? 'archived' : 'published'} successfully`);
-    } catch {
-      toast.error('Failed to update assessment status');
-    }
+      const { data: subs } = await supabase.from('submissions').select('id').eq('assessment_id', id);
+      if (subs?.length) {
+        const ids = subs.map(s => s.id);
+        await supabase.from('answers').delete().in('submission_id', ids);
+        await supabase.from('submissions').delete().eq('assessment_id', id);
+      }
+      await supabase.from('student_assessments').delete().eq('assessment_id', id);
+      await supabase.from('questions').delete().eq('assessment_id', id);
+      const { error } = await supabase.from('assessments').delete().eq('id', id);
+      if (error) throw error;
+      setConfirmDeleteId(null); showToast('Assessment deleted.'); fetchAssessments();
+    } catch { showToast('Failed to delete assessment.'); }
+    finally { setMutating(false); }
   };
 
-  const handleDelete = async () => {
-    if (!deleteModal) return;
-    setDeleting(true);
-    try {
-      await lecturerApi.deleteAssessment(deleteModal.id);
-      setAssessments(prev => prev.filter(a => a.id !== deleteModal.id));
-      toast.success('Assessment deleted');
-      setDeleteModal(null);
-    } catch {
-      toast.error('Failed to delete assessment');
-    } finally {
-      setDeleting(false);
-    }
+  const copyCode = (id, code) => {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopiedId(id); setTimeout(() => setCopiedId(null), 2000);
+    });
   };
-
-  const stats = {
-    total: assessments.length,
-    active: assessments.filter(a => a.is_active).length,
-    totalSubmissions: assessments.reduce((s, a) => s + (a.submission_count || 0), 0),
-    avgScore: assessments.filter(a => a.avg_score).length
-      ? Math.round(assessments.filter(a => a.avg_score).reduce((s, a) => s + a.avg_score, 0) / assessments.filter(a => a.avg_score).length)
-      : 0,
-  };
-
-  if (loading) return <LoadingState />;
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
-      <Sidebar />
-      <main className="flex-1 p-8 overflow-auto">
-
-        {/* Header */}
-        <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Assessments</h1>
-            <p className="text-gray-500 mt-1">Create and manage your theory assessments</p>
-          </div>
-          <Button variant="primary" onClick={() => navigate('/lecturer/assessments/create')}
-            className="flex items-center gap-2 whitespace-nowrap">
-            <Plus className="w-4 h-4" /> Create Assessment
-          </Button>
+    <div className="flex flex-col min-h-full bg-gray-50">
+      {/* Topbar */}
+      <div className="bg-white border-b border-gray-200 px-6 h-16 flex items-center justify-between sticky top-0 z-10">
+        <div>
+          <div className="text-[18px] font-bold text-gray-900">Assessments</div>
+          <div className="text-xs text-gray-400">{loading ? 'Loading…' : `${assessments.length} total`}</div>
         </div>
+        <button onClick={openCreatePanel} className="px-4 py-2 bg-gray-900 text-white text-sm font-semibold rounded-md hover:bg-gray-700 transition">
+          + Create Assessment
+        </button>
+      </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {[
-            { label: 'Total', value: stats.total, icon: <Layers className="w-5 h-5" />, color: 'bg-brand-50 text-brand-600' },
-            { label: 'Published', value: stats.active, icon: <CheckCircle2 className="w-5 h-5" />, color: 'bg-green-50 text-green-600' },
-            { label: 'Submissions', value: stats.totalSubmissions, icon: <Users className="w-5 h-5" />, color: 'bg-blue-50 text-blue-600' },
-            { label: 'Avg Score', value: `${stats.avgScore}%`, icon: <BarChart3 className="w-5 h-5" />, color: 'bg-purple-50 text-purple-600' },
-          ].map((s, i) => (
-            <motion.div key={i} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.07 }}>
-              <Card>
-                <CardContent className="p-4 flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${s.color}`}>{s.icon}</div>
-                  <div>
-                    <p className="text-xs text-gray-500">{s.label}</p>
-                    <p className="text-xl font-bold text-gray-900">{s.value}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
+      {/* Filter tabs */}
+      <div className="flex gap-1 px-6 pt-4 border-b border-gray-200 bg-white">
+        {FILTERS.map(f => (
+          <button key={f} onClick={() => setActiveFilter(f)}
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors mb-[-1px] ${activeFilter === f ? 'border-gray-900 text-gray-900 font-semibold' : 'border-transparent text-gray-400 hover:text-gray-700'}`}>
+            {f}
+            <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded-full ${activeFilter === f ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500'}`}>{counts[f]}</span>
+          </button>
+        ))}
+      </div>
 
-        {/* Filters */}
-        <Card className="mb-6">
-          <CardContent className="p-4 flex flex-col sm:flex-row gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                placeholder="Search by title or subject…"
-                value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-              className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white text-gray-700">
-              <option value="all">All Status</option>
-              <option value="active">Published</option>
-              <option value="inactive">Archived</option>
-            </select>
-            <select value={difficultyFilter} onChange={e => setDifficultyFilter(e.target.value)}
-              className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white text-gray-700">
-              <option value="all">All Difficulty</option>
-              <option value="easy">Easy</option>
-              <option value="medium">Medium</option>
-              <option value="hard">Hard</option>
-            </select>
-          </CardContent>
-        </Card>
-
-        {/* Assessment List */}
-        {filtered.length === 0 ? (
-          <EmptyState onCreateClick={() => navigate('/lecturer/assessments/create')} />
+      {/* Table */}
+      <div className="mx-6 my-6 bg-white border border-gray-200 rounded-xl overflow-hidden">
+        {fetchError ? (
+          <div className="p-10 text-center text-sm text-red-500">{fetchError}</div>
         ) : (
-          <div className="space-y-4">
-            <AnimatePresence>
-              {filtered.map((assessment, i) => (
-                <motion.div key={assessment.id}
-                  initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }} transition={{ delay: i * 0.05 }}>
-                  <AssessmentCard
-                    assessment={assessment}
-                    onToggle={() => handleToggleStatus(assessment)}
-                    onEdit={() => navigate(`/lecturer/assessments/${assessment.id}/edit`)}
-                    onView={() => navigate(`/lecturer/assessments/${assessment.id}`)}
-                    onDelete={() => setDeleteModal(assessment)}
-                  />
-                </motion.div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                {['Assessment', 'Topic', 'Questions', 'Max Marks', 'Submissions', 'Status', 'Actions'].map(h => (
+                  <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wide">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-400">Loading assessments…</td></tr>
+              ) : visible.length === 0 ? (
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-400">
+                  {activeFilter === 'All' ? 'No assessments yet. Click "+ Create Assessment" to get started.' : `No ${activeFilter.toLowerCase()} assessments.`}
+                </td></tr>
+              ) : visible.map(a => (
+                <tr key={a.id} className="border-b border-gray-100 hover:bg-gray-50 transition">
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-gray-900">{a.title}</div>
+                    {a.status === 'Active' && a.accessCode && (
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span className="text-xs font-mono bg-gray-100 px-2 py-0.5 rounded text-gray-600">{a.accessCode}</span>
+                        <button onClick={() => copyCode(a.id, a.accessCode)} className="text-xs text-indigo-500 hover:underline">
+                          {copiedId === a.id ? '✓ Copied' : 'Copy'}
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-gray-500">{a.topic || '—'}</td>
+                  <td className="px-4 py-3 text-gray-700">{a.questions}</td>
+                  <td className="px-4 py-3 text-gray-700">{a.maxMarks}</td>
+                  <td className="px-4 py-3 text-gray-700">{a.submissions}</td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${statusClass(a.status)}`}>{a.status}</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {a.status === 'Draft'  && <button onClick={() => openEditPanel(a)} className="px-2.5 py-1 border border-gray-200 text-xs text-gray-700 rounded-md hover:bg-gray-50 transition">Edit</button>}
+                      {a.status === 'Active' && <button onClick={() => navigate('/lecturer/grading')} className="px-2.5 py-1 border border-indigo-200 text-xs text-indigo-700 rounded-md hover:bg-indigo-50 transition">Grade</button>}
+                      {a.status === 'Closed' && <button onClick={() => handleReopen(a.id)} disabled={mutating} className="px-2.5 py-1 border border-green-200 text-xs text-green-700 rounded-md hover:bg-green-50 transition disabled:opacity-50">Reopen</button>}
+                      {(a.status === 'Draft' || a.status === 'Active') && (
+                        <button onClick={() => handleClose(a.id)} disabled={mutating} className="px-2.5 py-1 border border-gray-200 text-xs text-gray-500 rounded-md hover:bg-gray-50 transition disabled:opacity-50">Close</button>
+                      )}
+                      {confirmDeleteId === a.id ? (
+                        <>
+                          <span className="text-xs font-semibold text-red-600">Sure?</span>
+                          <button onClick={() => handleDelete(a.id)} disabled={mutating} className="px-2.5 py-1 border border-red-200 text-xs text-red-600 rounded-md hover:bg-red-50 transition disabled:opacity-50">{mutating ? '…' : 'Delete'}</button>
+                          <button onClick={() => setConfirmDeleteId(null)} disabled={mutating} className="px-2.5 py-1 border border-gray-200 text-xs text-gray-500 rounded-md hover:bg-gray-50 transition">Cancel</button>
+                        </>
+                      ) : (
+                        <button onClick={() => setConfirmDeleteId(a.id)} className="px-2.5 py-1 border border-red-100 text-xs text-red-500 rounded-md hover:bg-red-50 transition">Delete</button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
               ))}
-            </AnimatePresence>
-          </div>
+            </tbody>
+          </table>
         )}
-      </main>
-
-      {/* Delete Modal */}
-      <AnimatePresence>
-        {deleteModal && (
-          <DeleteModal
-            assessment={deleteModal}
-            deleting={deleting}
-            onConfirm={handleDelete}
-            onCancel={() => setDeleteModal(null)}
-          />
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-function AssessmentCard({ assessment, onToggle, onEdit, onView, onDelete }) {
-  const diff = DIFFICULTY_COLORS[assessment.difficulty] || DIFFICULTY_COLORS.medium;
-  return (
-    <Card className="hover:shadow-md transition-shadow">
-      <CardContent className="p-6">
-        <div className="flex flex-col lg:flex-row lg:items-center gap-4">
-          {/* Left: info */}
-          <div className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-2 mb-2">
-              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${diff.badge}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${diff.dot}`} />
-                {assessment.difficulty.charAt(0).toUpperCase() + assessment.difficulty.slice(1)}
-              </span>
-              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${assessment.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                {assessment.is_active ? <CheckCircle2 className="w-3 h-3" /> : <Archive className="w-3 h-3" />}
-                {assessment.is_active ? 'Published' : 'Archived'}
-              </span>
-            </div>
-            <h3 className="text-lg font-semibold text-gray-900 truncate">{assessment.title}</h3>
-            <p className="text-sm text-gray-500 mt-0.5">{assessment.subject}</p>
-            <div className="flex flex-wrap items-center gap-4 mt-3 text-sm text-gray-600">
-              <span className="flex items-center gap-1.5"><BookOpen className="w-4 h-4 text-gray-400" />{assessment.question_count ?? '—'} questions</span>
-              <span className="flex items-center gap-1.5"><Clock className="w-4 h-4 text-gray-400" />{assessment.duration_minutes} min</span>
-              <span className="flex items-center gap-1.5"><FileText className="w-4 h-4 text-gray-400" />{assessment.total_marks} marks</span>
-              <span className="flex items-center gap-1.5"><Users className="w-4 h-4 text-gray-400" />{assessment.submission_count ?? 0} submissions</span>
-              {assessment.avg_score != null && (
-                <span className="flex items-center gap-1.5"><BarChart3 className="w-4 h-4 text-gray-400" />Avg {assessment.avg_score}%</span>
-              )}
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <button onClick={onToggle} title={assessment.is_active ? 'Archive' : 'Publish'}
-              className="p-2 rounded-lg text-gray-400 hover:text-brand-600 hover:bg-brand-50 transition-colors">
-              {assessment.is_active ? <ToggleRight className="w-5 h-5 text-green-600" /> : <ToggleLeft className="w-5 h-5" />}
-            </button>
-            <button onClick={onView} title="View"
-              className="p-2 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
-              <Eye className="w-5 h-5" />
-            </button>
-            <button onClick={onEdit} title="Edit"
-              className="p-2 rounded-lg text-gray-400 hover:text-brand-600 hover:bg-brand-50 transition-colors">
-              <Edit className="w-5 h-5" />
-            </button>
-            <button onClick={onDelete} title="Delete"
-              className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
-              <Trash2 className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function EmptyState({ onCreateClick }) {
-  return (
-    <div className="text-center py-20">
-      <div className="w-20 h-20 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-        <FileText className="w-10 h-10 text-gray-300" />
       </div>
-      <h3 className="text-lg font-semibold text-gray-900 mb-2">No assessments found</h3>
-      <p className="text-gray-500 mb-6">Create your first assessment to get started.</p>
-      <Button variant="primary" onClick={onCreateClick}>
-        <Plus className="w-4 h-4 mr-2" /> Create Assessment
-      </Button>
-    </div>
-  );
-}
 
-function DeleteModal({ assessment, deleting, onConfirm, onCancel }) {
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-        className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
-        <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center mx-auto mb-4">
-          <AlertCircle className="w-6 h-6 text-red-600" />
+      {/* Toast */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm font-medium px-6 py-3 rounded-lg shadow-xl z-50 whitespace-nowrap animate-[fadeIn_0.2s_ease]">
+          {toast}
         </div>
-        <h3 className="text-lg font-bold text-gray-900 text-center mb-2">Delete Assessment?</h3>
-        <p className="text-gray-500 text-center text-sm mb-6">
-          "<span className="font-medium text-gray-700">{assessment.title}</span>" will be permanently deleted along with all its questions and submissions. This cannot be undone.
-        </p>
-        <div className="flex gap-3">
-          <button onClick={onCancel} className="flex-1 py-2.5 px-4 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
-            Cancel
+      )}
+
+      {/* Backdrop */}
+      {panelOpen && <div className="fixed inset-0 bg-black/30 z-40" onClick={closePanel} />}
+
+      {/* Slide-out panel */}
+      <aside className={`fixed top-0 right-0 bottom-0 w-[440px] bg-white border-l border-gray-200 shadow-2xl flex flex-col z-50 transition-transform duration-300 ${panelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
+          <div className="text-base font-bold text-gray-900">{editingId ? 'Edit Assessment' : 'Create Assessment'}</div>
+          <button onClick={closePanel} disabled={saving} className="w-8 h-8 bg-gray-100 rounded-md text-sm hover:bg-gray-200 transition flex items-center justify-center">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Assessment Title</label>
+            <input type="text" placeholder="e.g. CS-401 Midterm" value={form.title} onChange={setTopField('title')}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 transition" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Topic Tag</label>
+            <input type="text" placeholder="e.g. Data Structures" value={form.topic} onChange={setTopField('topic')}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 transition" />
+          </div>
+
+          <div className="border-t border-gray-100 pt-4">
+            <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-3">Questions</div>
+            {form.questions.map((q, idx) => (
+              <div key={idx} className="mb-4 bg-gray-50 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-500">Question {idx + 1}</span>
+                  {form.questions.length > 1 && (
+                    <button onClick={() => removeQuestion(idx)} className="text-xs text-red-400 hover:text-red-600 transition">Remove</button>
+                  )}
+                </div>
+                <textarea placeholder="Enter question text…" value={q.text} onChange={setQField(idx, 'text')} rows={3}
+                  className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 transition resize-none" />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Marks</label>
+                    <input type="number" min="1" max="20" placeholder="10" value={q.marks} onChange={setQField(idx, 'marks')}
+                      className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Expected Length</label>
+                    <select value={q.answerLength} onChange={setQField(idx, 'answerLength')}
+                      className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white">
+                      <option value="short">Short (1–2 sentences)</option>
+                      <option value="medium">Medium (1–2 paragraphs)</option>
+                      <option value="long">Long (essay)</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Sample Answer (for AI grading)</label>
+                  <textarea placeholder="Enter model answer…" value={q.sampleAnswer} onChange={setQField(idx, 'sampleAnswer')} rows={4}
+                    className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 transition resize-none" />
+                </div>
+              </div>
+            ))}
+            <button onClick={addQuestion} className="w-full py-2 border-2 border-dashed border-gray-200 text-sm text-gray-400 hover:border-indigo-300 hover:text-indigo-500 rounded-xl transition">
+              + Add Question
+            </button>
+          </div>
+        </div>
+
+        <div className="flex gap-2 px-6 py-4 border-t border-gray-200 shrink-0">
+          <button onClick={closePanel} disabled={saving} className="px-4 py-2 border border-gray-200 text-sm text-gray-600 rounded-md hover:bg-gray-50 transition disabled:opacity-50">Cancel</button>
+          <button onClick={(e) => { e.preventDefault(); if (form.title.trim()) saveAssessment('Draft'); }} disabled={saving}
+            className="px-4 py-2 border border-gray-300 text-sm text-gray-700 rounded-md hover:bg-gray-50 transition disabled:opacity-50">
+            {saving ? 'Saving…' : 'Save Draft'}
           </button>
-          <button onClick={onConfirm} disabled={deleting}
-            className="flex-1 py-2.5 px-4 rounded-xl bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-60">
-            {deleting ? 'Deleting…' : 'Delete'}
+          <button onClick={(e) => { e.preventDefault(); if (form.title.trim()) saveAssessment('Active'); }} disabled={saving}
+            className="flex-1 py-2 bg-gray-900 text-white text-sm font-semibold rounded-md hover:bg-gray-700 transition disabled:opacity-50">
+            {saving ? 'Publishing…' : 'Publish'}
           </button>
         </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-function LoadingState() {
-  return (
-    <div className="flex h-screen">
-      <Sidebar />
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-brand-600 border-r-transparent" />
-          <p className="mt-4 text-sm text-gray-600">Loading assessments…</p>
-        </div>
-      </div>
+      </aside>
     </div>
   );
 }

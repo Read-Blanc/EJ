@@ -1,523 +1,130 @@
-// src/pages/lecturer/QuestionBankPage.jsx
-// Manage question bank - create, edit, delete questions
-
-import { useState, useEffect, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import {
-  Search,
-  Filter,
-  Plus,
-  Edit,
-  Trash2,
-  Eye,
-  BookOpen,
-  AlertCircle,
-  CheckCircle2,
-  Copy,
-} from 'lucide-react';
-import { lecturerApi } from '../../api/endpoints';
-import { Sidebar } from '../../components/layout/Sidebar';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
-import { Button } from '../../components/ui/Button';
-import { Input } from '../../components/ui/Input';
-import { toast } from 'sonner';
+import { useState, useEffect, useCallback, useContext } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { supabase } from '../../supabaseClient';
+import { AuthContext } from '../../context/AuthContext';
 
 export default function QuestionBank() {
+  const { user } = useContext(AuthContext);
   const navigate = useNavigate();
+
   const [questions, setQuestions] = useState([]);
-  const [filteredQuestions, setFilteredQuestions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedSubject, setSelectedSubject] = useState('all');
-  const [selectedDifficulty, setSelectedDifficulty] = useState('all');
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [questionToDelete, setQuestionToDelete] = useState(null);
+  const [loading,   setLoading]   = useState(true);
+  const [search,    setSearch]    = useState('');
+  const [toast,     setToast]     = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [deleting,  setDeleting]  = useState(false);
 
-  useEffect(() => {
-    loadQuestions();
-  }, []);
+  const fetchQuestions = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('questions')
+      .select('id, text, marks, answer_length, sample_answer, assessments(title)')
+      .eq('assessments.created_by', user.id)
+      .order('id', { ascending: false });
 
+    if (error || !data) { setQuestions([]); setLoading(false); return; }
+    setQuestions(data);
+    setLoading(false);
+  }, [user.id]);
 
-  const loadQuestions = async () => {
-    try {
-      setLoading(true);
-      const data = await lecturerApi.getQuestions();
-      setQuestions(data);
-      setFilteredQuestions(data);
-      toast.success('Questions loaded successfully');
-    } catch (error) {
-      console.error(error);
-      toast.error('Failed to load questions');
-      // Use mock data
-      const mockData = getMockQuestions();
-      setQuestions(mockData);
-      setFilteredQuestions(mockData);
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => { fetchQuestions(); }, [fetchQuestions]);
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
+
+  const handleDelete = async (id) => {
+    setDeleting(true);
+    const { error } = await supabase.from('questions').delete().eq('id', id);
+    if (error) showToast('Failed to delete question.');
+    else { showToast('Question deleted.'); setConfirmDeleteId(null); fetchQuestions(); }
+    setDeleting(false);
   };
 
-const filterQuestions = useCallback(() => {
-  let filtered = [...questions];
+  const filtered = questions.filter(q =>
+    !search || q.text?.toLowerCase().includes(search.toLowerCase()) ||
+    q.assessments?.title?.toLowerCase().includes(search.toLowerCase())
+  );
 
-  if (searchQuery) {
-    filtered = filtered.filter(
-      (q) =>
-        q.question_text.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        q.subject.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }
+  const lengthLabel = { short: 'Short', medium: 'Medium', long: 'Long' };
 
-  if (selectedSubject !== 'all') {
-    filtered = filtered.filter((q) => q.subject === selectedSubject);
-  }
-
-  if (selectedDifficulty !== 'all') {
-    filtered = filtered.filter((q) => q.difficulty === selectedDifficulty);
-  }
-
-  setFilteredQuestions(filtered);
-}, [questions, searchQuery, selectedSubject, selectedDifficulty]);
-
- useEffect(() => {
-    filterQuestions();
-  }, [filterQuestions]);
-
-  const handleDelete = async () => {
-    try {
-      await lecturerApi.deleteQuestion(questionToDelete.id);
-      setQuestions(questions.filter((q) => q.id !== questionToDelete.id));
-      toast.success('Question deleted successfully');
-      setShowDeleteModal(false);
-      setQuestionToDelete(null);
-    } catch (error) {
-      console.error(error);
-      toast.error('Failed to delete question');
-    }
-  };
-
-  const handleDuplicate = async (question) => {
-    try {
-      const duplicated = {
-        ...question,
-        question_text: `${question.question_text} (Copy)`,
-      };
-      delete duplicated.id;
-      const newQuestion = await lecturerApi.createQuestion(duplicated);
-      setQuestions([newQuestion, ...questions]);
-      toast.success('Question duplicated successfully');
-    } catch (error) {
-      console.error(error);
-      toast.error('Failed to duplicate question');
-    }
-  };
-
-  const subjects = ['all', ...new Set(questions.map((q) => q.subject))];
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen">
-        <Sidebar role="lecturer" />
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-brand-600 border-r-transparent"></div>
-            <p className="mt-4 text-sm text-gray-600">Loading questions...</p>
-          </div>
+  return (
+    <div className="flex flex-col min-h-full bg-gray-50">
+      {/* Topbar */}
+      <div className="bg-white border-b border-gray-200 px-6 h-16 flex items-center justify-between sticky top-0 z-10">
+        <div>
+          <div className="text-[18px] font-bold text-gray-900">Question Bank</div>
+          <div className="text-xs text-gray-400">{loading ? 'Loading…' : `${questions.length} questions`}</div>
+        </div>
+        <div className="flex items-center gap-3">
+          <input type="text" placeholder="Search questions…" value={search} onChange={(e) => setSearch(e.target.value)}
+            className="border border-gray-200 rounded-md px-3 py-2 text-sm w-56 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+          <button onClick={() => navigate('/lecturer/questions/new')}
+            className="px-4 py-2 bg-gray-900 text-white text-sm font-semibold rounded-md hover:bg-gray-700 transition">
+            + New Question
+          </button>
         </div>
       </div>
-    );
-  }
 
-  return (
-    <div className="flex min-h-screen bg-gray-50">
-      <Sidebar role="lecturer" />
-
-      <main className="flex-1 p-8">
-        {/* Header */}
-        <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">Question Bank</h1>
-            <p className="text-gray-600">
-              Manage your assessment questions ({questions.length} total)
-            </p>
+      {/* List */}
+      <div className="p-6 space-y-3">
+        {loading ? (
+          <div className="text-center py-10 text-sm text-gray-400">Loading questions…</div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-16 text-sm text-gray-400">
+            {search ? 'No questions match your search.' : 'No questions yet. Create one to get started.'}
           </div>
-
-          <Button
-            variant="primary"
-            onClick={() => navigate('/lecturer/questions/create')}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Create Question
-          </Button>
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <StatCard label="Total Questions" value={questions.length} color="blue" />
-          <StatCard
-            label="Easy"
-            value={questions.filter((q) => q.difficulty === 'easy').length}
-            color="green"
-          />
-          <StatCard
-            label="Medium"
-            value={questions.filter((q) => q.difficulty === 'medium').length}
-            color="yellow"
-          />
-          <StatCard
-            label="Hard"
-            value={questions.filter((q) => q.difficulty === 'hard').length}
-            color="red"
-          />
-        </div>
-
-        {/* Filters */}
-        <Card className="mb-6">
-          <CardContent className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="md:col-span-1">
-                <Input
-                  type="text"
-                  placeholder="Search questions..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  icon={Search}
-                />
+        ) : filtered.map(q => (
+          <div key={q.id} className="bg-white border border-gray-200 rounded-xl p-5 hover:border-gray-300 transition">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 leading-relaxed">{q.text}</p>
+                {q.assessments?.title && (
+                  <div className="text-xs text-indigo-600 mt-1">📋 {q.assessments.title}</div>
+                )}
+                <div className="flex items-center gap-3 mt-2">
+                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">{q.marks ?? 0} marks</span>
+                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">{lengthLabel[q.answer_length] ?? q.answer_length}</span>
+                </div>
+                {q.sample_answer && (
+                  <div className="mt-3 bg-gray-50 border border-gray-100 rounded-lg p-3">
+                    <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Sample Answer</div>
+                    <p className="text-xs text-gray-500 leading-relaxed line-clamp-2">{q.sample_answer}</p>
+                  </div>
+                )}
               </div>
-
-              <div>
-                <select
-                  value={selectedSubject}
-                  onChange={(e) => setSelectedSubject(e.target.value)}
-                  className="block w-full rounded-lg border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500"
-                >
-                  {subjects.map((subject) => (
-                    <option key={subject} value={subject}>
-                      {subject === 'all' ? 'All Subjects' : subject}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <select
-                  value={selectedDifficulty}
-                  onChange={(e) => setSelectedDifficulty(e.target.value)}
-                  className="block w-full rounded-lg border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500"
-                >
-                  <option value="all">All Difficulties</option>
-                  <option value="easy">Easy</option>
-                  <option value="medium">Medium</option>
-                  <option value="hard">Hard</option>
-                </select>
-              </div>
-            </div>
-
-            {(searchQuery || selectedSubject !== 'all' || selectedDifficulty !== 'all') && (
-              <div className="mt-4 flex items-center gap-2 text-sm text-gray-600">
-                <Filter className="w-4 h-4" />
-                <span>
-                  Showing {filteredQuestions.length} of {questions.length} questions
-                </span>
-                <button
-                  onClick={() => {
-                    setSearchQuery('');
-                    setSelectedSubject('all');
-                    setSelectedDifficulty('all');
-                  }}
-                  className="ml-2 text-brand-600 hover:text-brand-700 font-medium"
-                >
-                  Clear filters
+              <div className="flex items-center gap-2 shrink-0">
+                <button onClick={() => navigate(`/lecturer/questions/${q.id}/edit`)}
+                  className="px-3 py-1.5 border border-gray-200 text-xs text-gray-600 rounded-md hover:bg-gray-50 transition">
+                  Edit
                 </button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Questions List */}
-        {filteredQuestions.length === 0 ? (
-          <EmptyState searchQuery={searchQuery} />
-        ) : (
-          <div className="space-y-4">
-            {filteredQuestions.map((question, index) => (
-              <QuestionCard
-                key={question.id}
-                question={question}
-                index={index}
-                onDelete={(q) => {
-                  setQuestionToDelete(q);
-                  setShowDeleteModal(true);
-                }}
-                onDuplicate={handleDuplicate}
-              />
-            ))}
-          </div>
-        )}
-      </main>
-
-      {/* Delete Confirmation Modal */}
-      {showDeleteModal && questionToDelete && (
-        <DeleteModal
-          question={questionToDelete}
-          onClose={() => {
-            setShowDeleteModal(false);
-            setQuestionToDelete(null);
-          }}
-          onConfirm={handleDelete}
-        />
-      )}
-    </div>
-  );
-}
-
-// Stat Card Component
-function StatCard({ label, value, color }) {
-  const colors = {
-    blue: 'from-blue-500 to-blue-600',
-    green: 'from-green-500 to-green-600',
-    yellow: 'from-yellow-500 to-yellow-600',
-    red: 'from-red-500 to-red-600',
-  };
-
-  return (
-    <Card>
-      <CardContent className="p-6">
-        <p className="text-sm text-gray-600 mb-1">{label}</p>
-        <div className="flex items-center justify-between">
-          <p className="text-3xl font-bold text-gray-900">{value}</p>
-          <div className={`w-3 h-3 rounded-full bg-gradient-to-br ${colors[color]}`} />
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// Question Card Component
-function QuestionCard({ question, index, onDelete, onDuplicate }) {
-  const navigate = useNavigate();
-
-  const difficultyColors = {
-    easy: 'bg-green-100 text-green-700',
-    medium: 'bg-yellow-100 text-yellow-700',
-    hard: 'bg-red-100 text-red-700',
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay: index * 0.05 }}
-    >
-      <Card hoverable>
-        <CardContent className="p-6">
-          <div className="flex items-start justify-between">
-            <div className="flex-1">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 rounded-lg bg-brand-100 flex items-center justify-center">
-                  <BookOpen className="w-5 h-5 text-brand-600" />
-                </div>
-                <div>
-                  <span className={`px-2 py-1 rounded text-xs font-medium ${difficultyColors[question.difficulty]}`}>
-                    {question.difficulty}
-                  </span>
-                  <span className="ml-2 text-sm text-gray-600">{question.subject}</span>
-                </div>
-              </div>
-
-              <p className="text-gray-900 mb-2 line-clamp-2">{question.question_text}</p>
-
-              <div className="flex items-center gap-4 text-sm text-gray-600">
-                <span>{question.marks} marks</span>
-                {question.created_at && (
-                  <span>
-                    Created: {new Date(question.created_at).toLocaleDateString('en-GB')}
-                  </span>
+                {confirmDeleteId === q.id ? (
+                  <>
+                    <span className="text-xs font-semibold text-red-600">Sure?</span>
+                    <button onClick={() => handleDelete(q.id)} disabled={deleting}
+                      className="px-3 py-1.5 border border-red-200 text-xs text-red-600 rounded-md hover:bg-red-50 transition disabled:opacity-50">
+                      {deleting ? '…' : 'Delete'}
+                    </button>
+                    <button onClick={() => setConfirmDeleteId(null)}
+                      className="px-3 py-1.5 border border-gray-200 text-xs text-gray-500 rounded-md hover:bg-gray-50 transition">
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button onClick={() => setConfirmDeleteId(q.id)}
+                    className="px-3 py-1.5 border border-red-100 text-xs text-red-500 rounded-md hover:bg-red-50 transition">
+                    Delete
+                  </button>
                 )}
               </div>
             </div>
-
-            {/* Actions */}
-            <div className="flex items-center gap-2 ml-4">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => navigate(`/lecturer/questions/${question.id}`)}
-              >
-                <Eye className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => navigate(`/lecturer/questions/${question.id}/edit`)}
-              >
-                <Edit className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => onDuplicate(question)}
-              >
-                <Copy className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => onDelete(question)}
-                className="text-red-600 hover:text-red-700 hover:bg-red-50"
-              >
-                <Trash2 className="w-4 h-4" />
-              </Button>
-            </div>
           </div>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
-}
+        ))}
+      </div>
 
-// Empty State
-function EmptyState({ searchQuery }) {
-  const navigate = useNavigate();
-
-  return (
-    <Card>
-      <CardContent className="p-12 text-center">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-4">
-          <BookOpen className="w-8 h-8 text-gray-400" />
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm font-medium px-6 py-3 rounded-lg shadow-xl z-50 whitespace-nowrap">
+          {toast}
         </div>
-
-        {searchQuery ? (
-          <>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">No questions found</h3>
-            <p className="text-gray-600">Try adjusting your search or filters</p>
-          </>
-        ) : (
-          <>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">No questions yet</h3>
-            <p className="text-gray-600 mb-4">Get started by creating your first question</p>
-            <Button variant="primary" onClick={() => navigate('/lecturer/questions/create')}>
-              <Plus className="w-4 h-4 mr-2" />
-              Create Question
-            </Button>
-          </>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-// Delete Modal
-function DeleteModal({ question, onClose, onConfirm }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="bg-white rounded-xl shadow-xl max-w-md w-full p-6"
-      >
-        <div className="flex items-start gap-4 mb-4">
-          <div className="flex-shrink-0 w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
-            <AlertCircle className="w-6 h-6 text-red-600" />
-          </div>
-          <div className="flex-1">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Question?</h3>
-            <p className="text-sm text-gray-600 mb-2">
-              Are you sure you want to delete this question? This action cannot be undone.
-            </p>
-            <p className="text-sm text-gray-500 italic line-clamp-2">
-              "{question.question_text}"
-            </p>
-          </div>
-        </div>
-
-        <div className="flex gap-3 justify-end">
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="danger" onClick={onConfirm}>
-            Delete Question
-          </Button>
-        </div>
-      </motion.div>
+      )}
     </div>
   );
-}
-
-// Mock questions data - Nigerian University Context
-function getMockQuestions() {
-  return [
-    {
-      id: 1,
-      question_text: 'Explain the concept of Object-Oriented Programming (OOP) and discuss its four main principles with relevant examples from real-world applications.',
-      subject: 'Computer Science',
-      difficulty: 'medium',
-      marks: 20,
-      model_answer: 'OOP is a programming paradigm based on objects containing data and code...',
-      created_at: new Date(Date.now() - 10 * 86400000).toISOString(),
-    },
-    {
-      id: 2,
-      question_text: 'Define set theory and explain the operations of union, intersection, and complement with appropriate Venn diagrams.',
-      subject: 'Mathematics',
-      difficulty: 'easy',
-      marks: 15,
-      model_answer: 'Set theory is a branch of mathematics that deals with collections of objects...',
-      created_at: new Date(Date.now() - 15 * 86400000).toISOString(),
-    },
-    {
-      id: 3,
-      question_text: 'Discuss Newton\'s laws of motion and provide practical examples of each law in everyday life.',
-      subject: 'Physics',
-      difficulty: 'medium',
-      marks: 20,
-      model_answer: 'Newton\'s first law states that an object at rest stays at rest...',
-      created_at: new Date(Date.now() - 20 * 86400000).toISOString(),
-    },
-    {
-      id: 4,
-      question_text: 'Explain the periodic table organization and discuss the trends in atomic radius, ionization energy, and electronegativity across periods and groups.',
-      subject: 'Chemistry',
-      difficulty: 'hard',
-      marks: 25,
-      model_answer: 'The periodic table is organized by atomic number and electron configuration...',
-      created_at: new Date(Date.now() - 25 * 86400000).toISOString(),
-    },
-    {
-      id: 5,
-      question_text: 'Describe the structure and function of DNA. Explain how genetic information is stored and transmitted.',
-      subject: 'Biology',
-      difficulty: 'medium',
-      marks: 20,
-      model_answer: 'DNA (Deoxyribonucleic Acid) is a double helix structure...',
-      created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
-    },
-    {
-      id: 6,
-      question_text: 'Analyze the major themes in Chinua Achebe\'s "Things Fall Apart" and discuss their relevance to Nigerian society.',
-      subject: 'English',
-      difficulty: 'hard',
-      marks: 25,
-      model_answer: 'Things Fall Apart explores themes of colonialism, tradition vs change...',
-      created_at: new Date(Date.now() - 35 * 86400000).toISOString(),
-    },
-    {
-      id: 7,
-      question_text: 'Explain the law of demand and supply. How do they interact to determine market equilibrium?',
-      subject: 'Economics',
-      difficulty: 'medium',
-      marks: 15,
-      model_answer: 'The law of demand states that as price increases, quantity demanded decreases...',
-      created_at: new Date(Date.now() - 40 * 86400000).toISOString(),
-    },
-    {
-      id: 8,
-      question_text: 'What is the accounting equation? Explain with examples how business transactions affect it.',
-      subject: 'Accounting',
-      difficulty: 'easy',
-      marks: 10,
-      model_answer: 'The accounting equation is: Assets = Liabilities + Equity...',
-      created_at: new Date(Date.now() - 45 * 86400000).toISOString(),
-    },
-  ];
 }

@@ -1,278 +1,163 @@
-import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import {
-  BookOpen, TrendingUp, Clock, Award,
-  ArrowRight, Calendar, Target, Sparkles,
-  FileText, CheckCircle2, AlertCircle,
-} from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
-import { studentApi } from '../../api/endpoints';
-import { Sidebar } from '../../components/layout/Sidebar';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
-import { Button } from '../../components/ui/Button';
+import { useState, useEffect, useCallback, useContext } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { supabase } from '../../supabaseClient';
+import { AuthContext } from '../../context/AuthContext';
+
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'morning';
+  if (h < 17) return 'afternoon';
+  return 'evening';
+}
+
+const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
 export default function StudentDashboard() {
-  const { user } = useAuth();
+  const { user } = useContext(AuthContext);
+  const navigate = useNavigate();
+
+  const [stats,   setStats]   = useState({ available: 0, submitted: 0, graded: 0, avgScore: null });
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState(null); // null = not loaded yet
+  const [recent,  setRecent]  = useState([]);
 
-  useEffect(() => { load(); }, []);
+  const firstName = user?.fullName?.split(' ')[0] ?? user?.email?.split('@')[0] ?? 'there';
 
-  const load = async () => {
-    try {
-      setLoading(true);
-      const res = await studentApi.getDashboard();
-      setData(res);
-    } catch {
-      // Backend unavailable — show honest empty state, NOT mock data
-      setData({
-        stats: { totalAssessments: 0, completedAssessments: 0, averageScore: 0, upcomingCount: 0 },
-        recentResults: [],
-        upcomingAssessments: [],
-      });
-    } finally {
-      setLoading(false);
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+
+    const { data: enrolled } = await supabase
+      .from('assessment_students')
+      .select('assessments(id, title, topic, status)')
+      .eq('student_id', user.id);
+
+    const { data: submissions } = await supabase
+      .from('submissions')
+      .select('id, status, submitted_at, assessments(title, topic, questions(marks)), answers(marks_awarded)')
+      .eq('student_id', user.id)
+      .order('submitted_at', { ascending: false })
+      .limit(5);
+
+    const available  = (enrolled ?? []).filter(e => e.assessments?.status === 'Active').length;
+    const subList    = submissions ?? [];
+    const graded     = subList.filter(s => s.status === 'Graded');
+    let avgScore     = null;
+
+    if (graded.length > 0) {
+      const totals = graded.map(s => {
+        const max     = s.assessments?.questions?.reduce((sum, q) => sum + (q.marks || 0), 0) ?? 0;
+        const awarded = s.answers?.reduce((sum, a) => sum + (a.marks_awarded || 0), 0) ?? 0;
+        return max > 0 ? (awarded / max) * 100 : null;
+      }).filter(Boolean);
+      if (totals.length) avgScore = Math.round(totals.reduce((a, b) => a + b, 0) / totals.length);
     }
-  };
 
-  if (loading) return <LoadingState />;
+    setStats({ available, submitted: subList.length, graded: graded.length, avgScore });
+    setRecent(subList.map(s => ({
+      id: s.id,
+      title: s.assessments?.title ?? '—',
+      topic: s.assessments?.topic ?? '',
+      status: s.status,
+      date: s.submitted_at ? new Date(s.submitted_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—',
+    })));
+    setLoading(false);
+  }, [user.id]);
 
-  const { stats, recentResults = [], upcomingAssessments = [] } = data || {};
-  const hasActivity = stats?.completedAssessments > 0;
-  const firstName = (user?.full_name || user?.username || '').split(' ')[0];
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const statCards = [
+    { label: 'Available',     value: loading ? '—' : stats.available,  accent: '#6366f1', icon: '📋' },
+    { label: 'Submitted',     value: loading ? '—' : stats.submitted,   accent: '#3b82f6', icon: '📤' },
+    { label: 'Graded',        value: loading ? '—' : stats.graded,      accent: '#10b981', icon: '✅' },
+    { label: 'Avg. Score',    value: loading ? '—' : stats.avgScore !== null ? `${stats.avgScore}%` : '—', accent: '#f59e0b', icon: '📊' },
+  ];
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
-      <Sidebar />
-      <main className="flex-1 p-8 overflow-auto">
+    <div className="flex flex-col min-h-full bg-gray-50">
+      {/* Topbar */}
+      <div className="bg-white border-b border-gray-200 px-6 h-14 flex items-center justify-between sticky top-0 z-10">
+        <nav className="flex items-center gap-2 text-sm text-gray-400">
+          <span>Home</span><span>/</span><span className="text-gray-700 font-medium">Dashboard</span>
+        </nav>
+        <button onClick={() => navigate('/student/assessments')}
+          className="px-4 py-2 bg-gray-900 text-white text-sm font-semibold rounded-md hover:bg-gray-700 transition">
+          Take Assessment
+        </button>
+      </div>
 
-        {/* Header */}
-        <div className="mb-8">
-          <motion.h1 initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-            className="text-3xl font-bold text-gray-900">
-            {getGreeting()}, {firstName} 👋
-          </motion.h1>
-          <p className="text-gray-500 mt-1">
-            {hasActivity
-              ? "Here's your academic performance overview."
-              : "You haven't taken any assessments yet. Let's get started."}
-          </p>
+      <div className="p-6 space-y-6">
+        {/* Welcome */}
+        <div>
+          <div className="text-xl font-bold text-gray-900">Good {greeting()}, {firstName} 👋</div>
+          <div className="text-sm text-gray-400 mt-0.5">Here's a summary of your progress.</div>
+          <div className="text-xs text-gray-300 mt-1">{today}</div>
         </div>
 
-        {/* Stats grid */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {[
-            { icon: <BookOpen className="w-5 h-5" />, label: 'Available', value: stats?.totalAssessments ?? 0, color: 'blue', sub: 'assessments' },
-            { icon: <CheckCircle2 className="w-5 h-5" />, label: 'Completed', value: stats?.completedAssessments ?? 0, color: 'green', sub: 'submitted' },
-            { icon: <Award className="w-5 h-5" />, label: 'Average Score', value: hasActivity ? `${stats?.averageScore ?? 0}%` : '—', color: 'purple', sub: hasActivity ? 'across all tests' : 'no data yet' },
-            { icon: <Clock className="w-5 h-5" />, label: 'Upcoming', value: stats?.upcomingCount ?? 0, color: 'orange', sub: 'due soon' },
-          ].map((s, i) => (
-            <motion.div key={i} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.07 }}>
-              <StatCard {...s} />
-            </motion.div>
+        {/* Stats */}
+        <div className="grid grid-cols-4 gap-4">
+          {statCards.map(s => (
+            <div key={s.label} className="bg-white border border-gray-200 rounded-xl p-5 relative overflow-hidden">
+              <div className="absolute top-0 left-0 right-0 h-1 rounded-t-xl" style={{ background: s.accent }} />
+              <div className="text-2xl mb-3">{s.icon}</div>
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">{s.label}</div>
+              <div className="text-3xl font-bold text-gray-900">{s.value}</div>
+            </div>
           ))}
         </div>
 
-        {/* No activity callout */}
-        {!hasActivity && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
-            <Card className="mb-8 border-brand-200 bg-gradient-to-r from-brand-50 to-white">
-              <CardContent className="p-6 flex items-center gap-5">
-                <div className="w-14 h-14 bg-brand-100 rounded-2xl flex items-center justify-center flex-shrink-0">
-                  <Sparkles className="w-7 h-7 text-brand-600" />
-                </div>
-                <div className="flex-1">
-                  <h3 className="font-semibold text-gray-900 mb-1">No assessments taken yet</h3>
-                  <p className="text-sm text-gray-500">Browse available assessments and start building your academic record.</p>
-                </div>
-                <Button variant="primary" asChild className="flex-shrink-0">
-                  <Link to="/student/assessments" className="flex items-center gap-2">
-                    Browse Assessments <ArrowRight className="w-4 h-4" />
-                  </Link>
-                </Button>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
-
-        {/* Main content grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-          {/* Recent Results */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-green-600" /> Recent Results
-              </CardTitle>
-              {recentResults.length > 0 && (
-                <Link to="/student/results" className="text-xs text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1">
-                  View all <ArrowRight className="w-3.5 h-3.5" />
-                </Link>
-              )}
-            </CardHeader>
-            <CardContent>
-              {recentResults.length === 0 ? (
-                <EmptySection
-                  icon={<FileText className="w-8 h-8" />}
-                  title="No results yet"
-                  desc="Your completed assessment results will appear here."
-                />
-              ) : (
-                <div className="space-y-3">
-                  {recentResults.slice(0, 4).map((r, i) => {
-                    const pct = r.percentage ?? Math.round((r.score / r.max_score) * 100);
-                    return (
-                      <Link key={r.id} to={`/student/results/${r.id}`}>
-                        <motion.div initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: i * 0.08 }}
-                          className="flex items-center justify-between p-3 rounded-xl hover:bg-gray-50 transition-colors border border-transparent hover:border-gray-200">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-900 truncate">{r.assessment_title}</p>
-                            <p className="text-xs text-gray-400 mt-0.5">{r.subject}</p>
-                          </div>
-                          <div className="flex items-center gap-2 flex-shrink-0 ml-3">
-                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold ${
-                              pct >= 70 ? 'bg-green-100 text-green-700' :
-                              pct >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
-                            }`}>{pct}%</div>
-                          </div>
-                        </motion.div>
-                      </Link>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Upcoming Assessments */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-brand-600" /> Upcoming Assessments
-              </CardTitle>
-              {upcomingAssessments.length > 0 && (
-                <Link to="/student/assessments" className="text-xs text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1">
-                  View all <ArrowRight className="w-3.5 h-3.5" />
-                </Link>
-              )}
-            </CardHeader>
-            <CardContent>
-              {upcomingAssessments.length === 0 ? (
-                <EmptySection
-                  icon={<Calendar className="w-8 h-8" />}
-                  title="No upcoming assessments"
-                  desc="When your lecturers publish new assessments, they'll show up here."
-                  action={<Link to="/student/assessments"><Button variant="secondary" className="mt-3 text-xs">Browse available</Button></Link>}
-                />
-              ) : (
-                <div className="space-y-3">
-                  {upcomingAssessments.slice(0, 4).map((a, i) => (
-                    <motion.div key={a.id} initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: i * 0.08 }}
-                      className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:border-brand-200 hover:bg-brand-50/30 transition-all">
-                      <div className="w-10 h-10 bg-brand-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                        <BookOpen className="w-5 h-5 text-brand-600" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{a.title}</p>
-                        <div className="flex items-center gap-2 text-xs text-gray-400 mt-0.5">
-                          <Clock className="w-3 h-3" />{a.durationMinutes ?? a.duration_minutes} min
-                          <span>·</span>
-                          <Target className="w-3 h-3" />{a.totalMarks ?? a.total_marks} marks
-                        </div>
-                      </div>
-                      <Button size="sm" variant="primary" asChild className="flex-shrink-0 text-xs py-1.5 px-3">
-                        <Link to={`/student/assessments/${a.id}`}>Start</Link>
-                      </Button>
-                    </motion.div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Performance teaser — only if there's data */}
-        {hasActivity && (
-          <Card className="mt-6">
-            <CardContent className="p-6 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-purple-100 rounded-2xl flex items-center justify-center">
-                  <TrendingUp className="w-6 h-6 text-purple-600" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-gray-900">Performance Analytics</h3>
-                  <p className="text-sm text-gray-500">View your score trends and subject breakdowns</p>
-                </div>
+        {/* Recent submissions + Quick actions */}
+        <div className="grid grid-cols-3 gap-4">
+          {/* Recent submissions (spans 2 cols) */}
+          <div className="col-span-2 bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <div className="font-semibold text-gray-900 text-sm">Recent Submissions</div>
+              <button onClick={() => navigate('/student/results')} className="text-xs text-indigo-600 hover:underline">View all →</button>
+            </div>
+            {loading ? (
+              <div className="p-6 text-center text-sm text-gray-400">Loading…</div>
+            ) : recent.length === 0 ? (
+              <div className="p-6 text-center text-sm text-gray-400">No submissions yet. Take an assessment to get started.</div>
+            ) : (
+              <div className="divide-y divide-gray-50">
+                {recent.map(r => (
+                  <div key={r.id} onClick={() => navigate(`/student/results/${r.id}`, { state: { submission: r } })}
+                    className="flex items-center justify-between px-5 py-3 hover:bg-gray-50 cursor-pointer transition">
+                    <div>
+                      <div className="text-sm font-medium text-gray-800">{r.title}</div>
+                      <div className="text-xs text-gray-400">{r.topic || 'No topic'} · {r.date}</div>
+                    </div>
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${r.status === 'Graded' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {r.status}
+                    </span>
+                  </div>
+                ))}
               </div>
-              <Button variant="secondary" asChild>
-                <Link to="/student/performance" className="flex items-center gap-2">
-                  View Performance <ArrowRight className="w-4 h-4" />
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-      </main>
-    </div>
-  );
-}
+            )}
+          </div>
 
-// ── Sub-components ─────────────────────────────────────────────────────────
-
-function StatCard({ icon, label, value, color, sub }) {
-  const colors = {
-    blue:   { bg: 'bg-blue-50',   icon: 'text-blue-600' },
-    green:  { bg: 'bg-green-50',  icon: 'text-green-600' },
-    purple: { bg: 'bg-purple-50', icon: 'text-purple-600' },
-    orange: { bg: 'bg-orange-50', icon: 'text-orange-600' },
-  };
-  const c = colors[color] || colors.blue;
-  return (
-    <Card>
-      <CardContent className="p-5">
-        <div className={`w-9 h-9 ${c.bg} rounded-xl flex items-center justify-center ${c.icon} mb-3`}>
-          {icon}
-        </div>
-        <p className="text-2xl font-bold text-gray-900">{value}</p>
-        <p className="text-xs text-gray-500 mt-0.5">{label}</p>
-        {sub && <p className="text-xs text-gray-400">{sub}</p>}
-      </CardContent>
-    </Card>
-  );
-}
-
-function EmptySection({ icon, title, desc, action }) {
-  return (
-    <div className="text-center py-8">
-      <div className="text-gray-200 flex justify-center mb-3">{icon}</div>
-      <p className="text-sm font-medium text-gray-700">{title}</p>
-      <p className="text-xs text-gray-400 mt-1 max-w-[200px] mx-auto">{desc}</p>
-      {action}
-    </div>
-  );
-}
-
-function LoadingState() {
-  return (
-    <div className="flex h-screen">
-      <Sidebar />
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-brand-600 border-r-transparent" />
-          <p className="mt-4 text-sm text-gray-500">Loading dashboard…</p>
+          {/* Quick actions */}
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100">
+              <div className="font-semibold text-gray-900 text-sm">Quick Actions</div>
+            </div>
+            <div className="p-3 space-y-2">
+              {[
+                { icon: '📝', label: 'Take Assessment', desc: 'Start an available test',     to: '/student/assessments' },
+                { icon: '📄', label: 'Past Results',    desc: 'View graded submissions',     to: '/student/results'     },
+                { icon: '📈', label: 'Performance',     desc: 'Your performance trends',     to: '/student/performance' },
+              ].map(qa => (
+                <button key={qa.label} onClick={() => navigate(qa.to)}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 transition text-left">
+                  <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-base shrink-0">{qa.icon}</div>
+                  <div>
+                    <div className="text-sm font-medium text-gray-800">{qa.label}</div>
+                    <div className="text-xs text-gray-400">{qa.desc}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
-}
-
-function getGreeting() {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  return 'Good evening';
 }

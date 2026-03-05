@@ -1,174 +1,218 @@
-import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { ChevronLeft, Award, CheckCircle2, AlertCircle, FileText, Lightbulb } from 'lucide-react';
-import { studentApi } from '../../api/endpoints';
-import { Sidebar } from '../../components/layout/Sidebar';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
-import { Button } from '../../components/ui/Button';
-import { toast } from 'sonner';
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { supabase } from '../../supabaseClient';
 
-const getGrade = (percentage) => {
-  if (percentage >= 70) return { grade: 'A', color: 'text-green-600', bg: 'bg-green-50' };
-  if (percentage >= 60) return { grade: 'B', color: 'text-blue-600', bg: 'bg-blue-50' };
-  if (percentage >= 50) return { grade: 'C', color: 'text-yellow-600', bg: 'bg-yellow-50' };
-  if (percentage >= 45) return { grade: 'D', color: 'text-orange-600', bg: 'bg-orange-50' };
-  return { grade: 'F', color: 'text-red-600', bg: 'bg-red-50' };
-};
+function CircularProgress({ value, max }) {
+  const pct  = max > 0 ? Math.min(value / max, 1) : 0;
+  const r    = 46;
+  const circ = 2 * Math.PI * r;
+  const dash = circ * (1 - pct);
+  const color = pct >= 0.75 ? '#10b981' : pct >= 0.5 ? '#f59e0b' : '#ef4444';
+  return (
+    <svg width="104" height="104" viewBox="0 0 104 104">
+      <circle cx="52" cy="52" r={r} fill="none" stroke="#f0f0f0" strokeWidth="8" />
+      <circle cx="52" cy="52" r={r} fill="none" stroke={color} strokeWidth="8"
+        strokeDasharray={circ} strokeDashoffset={dash} strokeLinecap="round"
+        transform="rotate(-90 52 52)" style={{ transition: 'stroke-dashoffset 0.5s ease' }} />
+    </svg>
+  );
+}
+
+function gradeLabel(pct) {
+  if (pct === null) return 'Pending';
+  if (pct >= 90) return 'A';
+  if (pct >= 80) return 'B';
+  if (pct >= 70) return 'C';
+  if (pct >= 60) return 'D';
+  return 'F';
+}
 
 export default function ResultDetail() {
-  const { id } = useParams();
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const navigate  = useNavigate();
+  const { id }    = useParams();
+  const location  = useLocation();
+  const submission = location.state?.submission ?? null;
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        setLoading(true);
-        const data = await studentApi.getResultDetails(id);
-        setResult(data);
-      } catch (error) {
-        console.error(error);
-        toast.error('Failed to load result details');
-        setResult(null);
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, [id]);
+  const [answers,  setAnswers]  = useState([]);
+  const [loading,  setLoading]  = useState(true);
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen">
-        <Sidebar />
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-brand-600 border-r-transparent mb-3" />
-            <p className="text-gray-500">Loading result...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const fetchAnswers = useCallback(async () => {
+    if (!submission?.id && !id) return;
+    setLoading(true);
+    const subId = submission?.id ?? id;
 
-  if (!result) {
-    return (
-      <div className="flex min-h-screen">
-        <Sidebar />
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <AlertCircle className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Result not found</h3>
-            <p className="text-gray-500 mb-4">This result could not be loaded.</p>
-            <Link to="/student/results">
-              <Button variant="primary">Back to Results</Button>
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
+    const { data, error } = await supabase
+      .from('answers')
+      .select('id, answer_text, marks_awarded, questions(id, text, marks, sample_answer, order_index)')
+      .eq('submission_id', subId);
 
-  const percentage = result.percentage ?? (result.score && result.max_score ? Math.round((result.score / result.max_score) * 100) : 0);
-  const gradeInfo = getGrade(percentage);
+    if (error || !data) { setAnswers([]); setLoading(false); return; }
+    setAnswers([...data].sort((a, b) => (a.questions?.order_index ?? 0) - (b.questions?.order_index ?? 0)));
+    setLoading(false);
+  }, [submission, id]);
+
+  useEffect(() => { fetchAnswers(); }, [fetchAnswers]);
+
+  const formatDate = (iso) => iso
+    ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+    : '—';
+
+  if (!submission && !id) return (
+    <div className="flex items-center justify-center h-full text-sm text-gray-400 p-10">
+      No submission selected.{' '}
+      <button onClick={() => navigate('/student/results')} className="ml-2 text-indigo-600 underline">Return to results</button>
+    </div>
+  );
+
+  const totalMarks   = answers.reduce((sum, a) => sum + (a.questions?.marks ?? 0), 0);
+  const awardedMarks = answers.reduce((sum, a) => sum + (a.marks_awarded ?? 0), 0);
+  const pct          = submission?.status === 'Graded' && totalMarks > 0
+    ? Math.round((awardedMarks / totalMarks) * 100) : null;
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
-      <Sidebar />
-      <main className="flex-1 p-8 overflow-auto">
-        <Link to="/student/results" className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 mb-6">
-          <ChevronLeft className="w-4 h-4" /> Back to Results
-        </Link>
+    <div className="flex flex-col min-h-full bg-gray-50">
+      {/* Topbar */}
+      <div className="bg-white border-b border-gray-200 px-6 h-14 flex items-center sticky top-0 z-10">
+        <nav className="flex items-center gap-2 text-sm text-gray-400">
+          <button onClick={() => navigate('/student/results')} className="hover:text-gray-700 transition">My Results</button>
+          <span>/</span>
+          <span className="text-gray-900 font-medium">{submission?.title}</span>
+        </nav>
+      </div>
 
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">{result.assessment_title || 'Assessment Result'}</h1>
-          {result.subject && <p className="text-brand-600 font-medium mt-1">{result.subject}</p>}
-          {result.submitted_at && (
-            <p className="text-gray-500 text-sm mt-1">Submitted {new Date(result.submitted_at).toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
-          )}
+      <div className="p-6">
+        {/* Title row */}
+        <div className="flex items-start justify-between mb-5">
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">{submission?.title}</h1>
+            <div className="text-sm text-gray-400 mt-1">
+              {submission?.topic ? `${submission.topic} · ` : ''}Submitted {formatDate(submission?.submittedAt)}
+            </div>
+          </div>
+          <span className={`px-3 py-1 rounded-full text-xs font-semibold mt-1 ${submission?.status === 'Graded' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+            {submission?.status ?? 'Pending'}
+          </span>
         </div>
 
-        {/* Score Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <Card className="md:col-span-1">
-            <CardContent className="p-8 text-center">
-              <div className={`inline-flex items-center justify-center w-24 h-24 rounded-full text-4xl font-bold mb-3 ${gradeInfo.bg} ${gradeInfo.color}`}>
-                {gradeInfo.grade}
-              </div>
-              <p className="text-3xl font-bold text-gray-900">{percentage}%</p>
-              {result.score != null && result.max_score != null && (
-                <p className="text-gray-500 text-sm mt-1">{result.score} / {result.max_score} marks</p>
-              )}
-            </CardContent>
-          </Card>
+        {/* Metric cards */}
+        <div className="grid grid-cols-4 gap-3 mb-6">
+          {[
+            { label: 'Questions',    value: loading ? '—' : answers.length,              sub: 'in this submission' },
+            { label: 'Total Marks',  value: loading ? '—' : totalMarks,                  sub: 'available' },
+            { label: 'Your Score',   value: pct !== null ? awardedMarks : '—',           sub: pct !== null ? `${pct}% score` : 'pending review',
+              color: pct !== null ? (pct >= 75 ? 'text-emerald-500' : pct >= 50 ? 'text-amber-500' : 'text-red-500') : 'text-gray-400' },
+            { label: 'Grade',        value: gradeLabel(pct),                              sub: 'overall grade',
+              color: pct !== null && pct >= 60 ? 'text-emerald-500' : pct !== null ? 'text-red-500' : 'text-gray-400' },
+          ].map(({ label, value, sub, color }) => (
+            <div key={label} className="bg-white border border-gray-200 rounded-xl p-4">
+              <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-2">{label}</div>
+              <div className={`text-[28px] font-bold leading-none mb-1 ${color ?? 'text-gray-900'}`}>{value}</div>
+              <div className="text-xs text-gray-400">{sub}</div>
+            </div>
+          ))}
+        </div>
 
-          <Card className="md:col-span-2">
-            <CardHeader><CardTitle>Performance Summary</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              {result.ai_feedback && (
-                <div className="p-4 bg-blue-50 rounded-xl">
-                  <div className="flex items-start gap-2">
-                    <Lightbulb className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
+        {/* Main layout */}
+        {loading ? (
+          <div className="text-center py-10 text-sm text-gray-400">Loading answers…</div>
+        ) : (
+          <div className="grid grid-cols-[1fr_280px] gap-4 items-start">
+            {/* Left: answers */}
+            <div className="space-y-4">
+              {answers.length === 0 ? (
+                <div className="bg-white border border-gray-200 rounded-xl p-6 text-center text-sm text-gray-400">No answers found.</div>
+              ) : answers.map((a, idx) => {
+                const max       = a.questions?.marks ?? 0;
+                const awarded   = a.marks_awarded ?? null;
+                const qPct      = awarded !== null && max > 0 ? awarded / max : null;
+                const scoreColor = qPct !== null ? (qPct >= 0.75 ? '#10b981' : qPct >= 0.5 ? '#f59e0b' : '#ef4444') : '#ccc';
+
+                return (
+                  <div key={a.id} className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+                    {/* Question */}
                     <div>
-                      <p className="text-sm font-medium text-blue-900 mb-1">AI Feedback</p>
-                      <p className="text-sm text-blue-700">{result.ai_feedback}</p>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Question {idx + 1}</span>
+                        <span className="text-xs font-semibold text-gray-500">
+                          {awarded !== null ? `${awarded} / ${max} marks` : `${max} marks`}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-800">{a.questions?.text ?? '—'}</p>
                     </div>
-                  </div>
-                </div>
-              )}
-              {result.lecturer_comment && (
-                <div className="p-4 bg-purple-50 rounded-xl">
-                  <p className="text-sm font-medium text-purple-900 mb-1">Lecturer Comment</p>
-                  <p className="text-sm text-purple-700">{result.lecturer_comment}</p>
-                </div>
-              )}
-              {!result.ai_feedback && !result.lecturer_comment && (
-                <p className="text-gray-500 text-sm">No feedback available yet.</p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
 
-        {/* Question Breakdown */}
-        {result.answers && result.answers.length > 0 && (
-          <Card>
-            <CardHeader><CardTitle>Question Breakdown</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              {result.answers.map((answer, i) => (
-                <motion.div key={answer.question_id || i} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
-                  <div className="border border-gray-100 rounded-xl p-5">
-                    <div className="flex items-start justify-between gap-4 mb-3">
-                      <div className="flex items-start gap-3">
-                        <span className="flex-shrink-0 w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-sm font-medium text-gray-600">{i + 1}</span>
-                        <p className="text-sm font-medium text-gray-900">{answer.question_text}</p>
-                      </div>
-                      {answer.score != null && answer.max_score != null && (
-                        <div className={`flex-shrink-0 px-3 py-1 rounded-lg text-sm font-semibold ${getGrade((answer.score / answer.max_score) * 100).bg} ${getGrade((answer.score / answer.max_score) * 100).color}`}>
-                          {answer.score}/{answer.max_score}
-                        </div>
-                      )}
-                    </div>
-                    {answer.answer_text && (
-                      <div className="ml-10 mt-2">
-                        <p className="text-xs text-gray-400 mb-1 uppercase tracking-wide">Your Answer</p>
-                        <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3">{answer.answer_text}</p>
+                    {/* Sample answer */}
+                    {a.questions?.sample_answer && (
+                      <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
+                        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Reference Answer</div>
+                        <p className="text-xs text-gray-500 leading-relaxed">{a.questions.sample_answer}</p>
                       </div>
                     )}
-                    {answer.feedback && (
-                      <div className="ml-10 mt-2 p-3 bg-blue-50 rounded-lg">
-                        <p className="text-xs text-blue-500 mb-1 font-medium">Feedback</p>
-                        <p className="text-sm text-blue-800">{answer.feedback}</p>
+
+                    {/* Student answer */}
+                    <div>
+                      <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Your Answer</div>
+                      <div className="bg-gray-50 border-l-4 border-indigo-400 rounded-r-lg p-3">
+                        {a.answer_text
+                          ? a.answer_text.split('\n\n').map((para, i) => <p key={i} className="text-sm text-gray-700 leading-relaxed mb-1 last:mb-0">{para}</p>)
+                          : <p className="text-sm text-gray-400 italic">No answer submitted.</p>
+                        }
+                      </div>
+                    </div>
+
+                    {/* Score bar */}
+                    {qPct !== null && (
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full transition-all" style={{ width: `${qPct * 100}%`, background: scoreColor }} />
+                        </div>
+                        <span className="text-xs font-semibold" style={{ color: scoreColor }}>{Math.round(qPct * 100)}%</span>
                       </div>
                     )}
                   </div>
-                </motion.div>
-              ))}
-            </CardContent>
-          </Card>
+                );
+              })}
+            </div>
+
+            {/* Right sidebar */}
+            <aside className="space-y-3 sticky top-[56px]">
+              {/* Grade ring */}
+              <div className="bg-white border border-gray-200 rounded-xl p-5">
+                <div className="text-sm font-semibold text-gray-900 mb-4">Overall Grade</div>
+                <div className="flex justify-center mb-3 relative">
+                  <CircularProgress value={pct !== null ? awardedMarks : 0} max={totalMarks > 0 ? totalMarks : 1} />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="flex items-baseline gap-0.5">
+                      <span className="text-[28px] font-bold text-gray-900 leading-none">{pct !== null ? awardedMarks : '—'}</span>
+                      <span className="text-xs text-gray-400">/{totalMarks}</span>
+                    </div>
+                  </div>
+                </div>
+                {pct !== null && (
+                  <div className={`text-center text-lg font-bold ${pct >= 60 ? 'text-emerald-500' : 'text-red-500'}`}>
+                    {gradeLabel(pct)} · {pct}%
+                  </div>
+                )}
+              </div>
+
+              {/* Info */}
+              <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-3">
+                {[
+                  { label: 'Assessment', value: submission?.title },
+                  { label: 'Topic',      value: submission?.topic || 'No topic' },
+                  { label: 'Status',     value: submission?.status },
+                  { label: 'Submitted',  value: formatDate(submission?.submittedAt) },
+                  { label: 'Max Marks',  value: `${totalMarks} marks` },
+                ].map(row => (
+                  <div key={row.label} className="flex justify-between gap-2">
+                    <span className="text-xs text-gray-400 font-medium">{row.label}</span>
+                    <span className="text-xs text-gray-700 font-semibold text-right">{row.value}</span>
+                  </div>
+                ))}
+              </div>
+            </aside>
+          </div>
         )}
-      </main>
+      </div>
     </div>
   );
 }
