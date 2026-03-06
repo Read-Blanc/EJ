@@ -10,8 +10,9 @@ export const ProtectedRoute = ({ children, requiredRole }) => {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50">
         <div className="text-center">
-          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-brand-600 border-r-transparent"></div>
-          <p className="mt-4 text-sm text-gray-600">Loading...</p>
+          {/* Spinner — gray-950, consistent with the rest of the app */}
+          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-gray-950 border-r-transparent" />
+          <p className="mt-4 text-sm text-gray-400">Loading…</p>
         </div>
       </div>
     );
@@ -24,9 +25,8 @@ export const ProtectedRoute = ({ children, requiredRole }) => {
 
   // Check role if required
   if (requiredRole && user?.role !== requiredRole) {
-    // Redirect to correct dashboard based on actual role
     const redirectPath =
-      user?.role === "student" ? "/student/dashboard" : "/lecturer/dashboard";
+      user?.role === "student" ? "/student" : "/lecturer";
     return <Navigate to={redirectPath} replace />;
   }
 

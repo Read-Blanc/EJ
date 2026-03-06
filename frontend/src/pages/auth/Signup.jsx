@@ -1,4 +1,4 @@
-import { useState, useEffect, useContext } from 'react';
+import { useState, useEffect, useContext, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../../supabaseClient';
 import { AuthContext } from '../../context/AuthContext';
@@ -23,7 +23,7 @@ const SLIDES = [
     alt:     'University students collaborating over laptops',
     tag:     'Free to join',
     title:   'Get started\nin minutes.',
-    caption: 'No credit card, no setup hassle. Create your account and you\'re ready from day one.',
+    caption: "No credit card, no setup hassle. Create your account and you're ready from day one.",
   },
 ];
 
@@ -49,55 +49,84 @@ function passwordStrength(pw) {
 }
 
 function LeftPanel() {
-  const [idx,     setIdx]     = useState(0);
-  const [visible, setVisible] = useState(true);
+  const [idx, setIdx] = useState(0);
+  const timerRef = useRef(null);
+
+  const goTo = (i) => {
+    setIdx(i);
+    clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => setIdx(cur => (cur + 1) % SLIDES.length), 5000);
+  };
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setVisible(false);
-      setTimeout(() => { setIdx(i => (i + 1) % SLIDES.length); setVisible(true); }, 400);
-    }, 5000);
-    return () => clearInterval(interval);
+    timerRef.current = setInterval(() => setIdx(cur => (cur + 1) % SLIDES.length), 5000);
+    return () => clearInterval(timerRef.current);
   }, []);
 
-  const slide = SLIDES[idx];
-
   return (
-    <div className="hidden lg:block w-[520px] shrink-0 relative overflow-hidden">
+    <div className="hidden lg:flex w-[520px] shrink-0 relative overflow-hidden flex-col">
+      {/* All images stacked — CSS crossfade, zero blank gap */}
       {SLIDES.map((s, i) => (
-        <img key={s.img} src={s.img} alt={s.alt}
+        <img
+          key={s.img}
+          src={s.img}
+          alt={s.alt}
           className="absolute inset-0 w-full h-full object-cover transition-opacity duration-700"
-          style={{ opacity: i === idx ? 1 : 0 }} />
+          style={{ opacity: i === idx ? 1 : 0 }}
+        />
       ))}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-black/20" />
 
+      {/* Overlay */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/30" />
+
+      {/* Top logo */}
       <div className="absolute top-10 left-10 z-10">
         <Link to="/" className="inline-flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0">
+          <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 shadow-md">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#111" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
             </svg>
           </div>
-          <span className="text-white font-semibold text-base tracking-tight">EvalAI</span>
+          <span className="text-white font-semibold text-base tracking-tight drop-shadow">EvalAI</span>
         </Link>
       </div>
 
+      {/* Bottom text — content crossfades without any blank period */}
       <div className="absolute bottom-0 left-0 right-0 p-10 z-10">
-        <div style={{
-          opacity:    visible ? 1 : 0,
-          transform:  visible ? 'translateY(0)' : 'translateY(10px)',
-          transition: 'opacity 0.4s ease, transform 0.4s ease',
-        }}>
-          <span className="inline-block text-[10px] font-bold text-white/60 uppercase tracking-[0.2em] mb-3">{slide.tag}</span>
-          <h2 className="text-[26px] font-bold text-white leading-tight whitespace-pre-line mb-3">{slide.title}</h2>
-          <p className="text-[14px] text-white/70 leading-relaxed max-w-[320px]">{slide.caption}</p>
+        <div className="relative" style={{ minHeight: '120px' }}>
+          {SLIDES.map((s, i) => (
+            <div
+              key={i}
+              className="absolute inset-0 transition-opacity duration-500"
+              style={{ opacity: i === idx ? 1 : 0, pointerEvents: i === idx ? 'auto' : 'none' }}
+            >
+              <span className="inline-block text-[10px] font-bold text-white/60 uppercase tracking-[0.2em] mb-3">
+                {s.tag}
+              </span>
+              <h2 className="text-[26px] font-bold text-white leading-tight whitespace-pre-line mb-3">
+                {s.title}
+              </h2>
+              <p className="text-[14px] text-white/70 leading-relaxed max-w-[320px]">
+                {s.caption}
+              </p>
+            </div>
+          ))}
         </div>
-        <div className="flex items-center gap-2 mt-6">
+
+        {/* Dot indicators — larger, better hit target */}
+        <div className="flex items-center gap-2 mt-8">
           {SLIDES.map((_, i) => (
-            <button key={i}
-              onClick={() => { setVisible(false); setTimeout(() => { setIdx(i); setVisible(true); }, 400); }}
-              className="rounded-full bg-white transition-all duration-300"
-              style={{ width: i === idx ? '22px' : '6px', height: '6px', opacity: i === idx ? 1 : 0.35 }} />
+            <button
+              key={i}
+              onClick={() => goTo(i)}
+              aria-label={`Go to slide ${i + 1}`}
+              className="rounded-full bg-white transition-all duration-300 focus:outline-none"
+              style={{
+                width:   i === idx ? '24px' : '8px',
+                height:  '8px',
+                opacity: i === idx ? 1 : 0.4,
+              }}
+            />
           ))}
         </div>
       </div>
@@ -188,7 +217,9 @@ export default function Signup() {
                     <div className="grid grid-cols-2 gap-2">
                       {ROLES.map(r => (
                         <button key={r.value} type="button" onClick={() => setRole(r.value)}
-                          className={`flex items-center gap-2.5 px-3.5 py-3 rounded-xl border text-left transition-all duration-200 ${role === r.value ? 'bg-gray-950 border-gray-950 text-white' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-400 hover:text-gray-800'}`}>
+                          className={`flex items-center gap-2.5 px-3.5 py-3 rounded-xl border text-left transition-all duration-200 ${role === r.value
+                            ? 'bg-gray-950 border-gray-950 text-white'
+                            : 'bg-white border-gray-200 text-gray-500 hover:border-gray-400 hover:text-gray-800'}`}>
                           <span>{r.icon}</span>
                           <span className="text-[13px] font-semibold">{r.label}</span>
                         </button>
@@ -225,21 +256,23 @@ export default function Signup() {
                     {password && (
                       <div className="mt-2 space-y-1">
                         <div className="flex gap-1">
-                          {[1,2,3,4].map(i => (
-                            <div key={i} className="flex-1 h-1 rounded-full transition-all duration-300"
-                              style={{ background: i <= strength.score ? strength.color : '#e5e7eb' }} />
+                          {[1, 2, 3, 4].map(n => (
+                            <div key={n} className="h-1 flex-1 rounded-full transition-all duration-300"
+                              style={{ background: strength.score >= n ? strength.color : '#e5e7eb' }} />
                           ))}
                         </div>
-                        <p className="text-[11px] font-medium" style={{ color: strength.color }}>{strength.label}</p>
+                        <p className="text-xs" style={{ color: strength.color }}>{strength.label}</p>
                       </div>
                     )}
                   </div>
 
                   <div>
                     <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Confirm Password</label>
-                    <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
-                      placeholder="Repeat your password" required autoComplete="new-password"
-                      className={`w-full border bg-white text-gray-900 placeholder-gray-300 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-gray-900/10 transition-all ${confirmPassword && confirmPassword !== password ? 'border-red-300' : 'border-gray-200 hover:border-gray-400 focus:border-gray-900'}`} />
+                    <input type={showPass ? 'text' : 'password'} value={confirmPassword}
+                      onChange={e => setConfirmPassword(e.target.value)}
+                      placeholder="Re-enter password" required autoComplete="new-password"
+                      className={`w-full border hover:border-gray-400 focus:border-gray-900 bg-white text-gray-900 placeholder-gray-300 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-gray-900/10 transition-all ${
+                        confirmPassword && confirmPassword !== password ? 'border-red-300' : 'border-gray-200'}`} />
                     {confirmPassword && confirmPassword !== password && (
                       <p className="text-xs text-red-500 mt-1">Passwords don't match</p>
                     )}

@@ -17,7 +17,6 @@ export default function OAuth() {
       const { data: { session }, error } = await supabase.auth.getSession();
 
       if (error || !session) {
-        // Something went wrong — send back to login
         navigate('/login', { replace: true });
         return;
       }
@@ -44,18 +43,19 @@ export default function OAuth() {
   }, [navigate, setUser]);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <div className="text-center space-y-4">
-        <div className="flex gap-2 justify-center">
+    <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="text-center space-y-5">
+        {/* Spinner — gray-950 to match the rest of the app, no off-brand indigo */}
+        <div className="flex gap-1.5 justify-center">
           {[0, 1, 2].map(i => (
             <div
               key={i}
-              className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce"
+              className="w-2 h-2 rounded-full bg-gray-950 animate-bounce"
               style={{ animationDelay: `${i * 0.15}s` }}
             />
           ))}
         </div>
-        <p className="text-sm text-gray-400">Signing you in…</p>
+        <p className="text-sm text-gray-400 font-medium">Signing you in…</p>
       </div>
     </div>
   );

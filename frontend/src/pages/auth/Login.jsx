@@ -1,9 +1,8 @@
-import { useState, useEffect, useContext } from 'react';
+import { useState, useEffect, useContext, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../../supabaseClient';
 import { AuthContext } from '../../context/AuthContext';
 
-// Unsplash direct CDN URLs — no API key needed, free to use
 const SLIDES = [
   {
     img:     'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&w=1200&q=80',
@@ -29,22 +28,24 @@ const SLIDES = [
 ];
 
 function LeftPanel() {
-  const [idx,     setIdx]     = useState(0);
-  const [visible, setVisible] = useState(true);
+  const [idx, setIdx] = useState(0);
+  const timerRef = useRef(null);
+
+  const goTo = (i) => {
+    setIdx(i);
+    // Reset the auto-advance timer when user manually clicks
+    clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => setIdx(cur => (cur + 1) % SLIDES.length), 5000);
+  };
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setVisible(false);
-      setTimeout(() => { setIdx(i => (i + 1) % SLIDES.length); setVisible(true); }, 400);
-    }, 5000);
-    return () => clearInterval(interval);
+    timerRef.current = setInterval(() => setIdx(cur => (cur + 1) % SLIDES.length), 5000);
+    return () => clearInterval(timerRef.current);
   }, []);
 
-  const slide = SLIDES[idx];
-
   return (
-    <div className="hidden lg:block w-[520px] shrink-0 relative overflow-hidden">
-      {/* Photo */}
+    <div className="hidden lg:flex w-[520px] shrink-0 relative overflow-hidden flex-col">
+      {/* All images stacked — CSS crossfade, zero blank gap */}
       {SLIDES.map((s, i) => (
         <img
           key={s.img}
@@ -55,49 +56,56 @@ function LeftPanel() {
         />
       ))}
 
-      {/* Dark overlay gradient */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-black/20" />
+      {/* Overlay */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/30" />
 
       {/* Top logo */}
       <div className="absolute top-10 left-10 z-10">
         <Link to="/" className="inline-flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0">
+          <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 shadow-md">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#111" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
             </svg>
           </div>
-          <span className="text-white font-semibold text-base tracking-tight">EvalAI</span>
+          <span className="text-white font-semibold text-base tracking-tight drop-shadow">EvalAI</span>
         </Link>
       </div>
 
-      {/* Bottom text overlay */}
+      {/* Bottom text — always visible, content crossfades */}
       <div className="absolute bottom-0 left-0 right-0 p-10 z-10">
-        <div
-          style={{
-            opacity:    visible ? 1 : 0,
-            transform:  visible ? 'translateY(0)' : 'translateY(10px)',
-            transition: 'opacity 0.4s ease, transform 0.4s ease',
-          }}
-        >
-          <span className="inline-block text-[10px] font-bold text-white/60 uppercase tracking-[0.2em] mb-3">
-            {slide.tag}
-          </span>
-          <h2 className="text-[26px] font-bold text-white leading-tight whitespace-pre-line mb-3">
-            {slide.title}
-          </h2>
-          <p className="text-[14px] text-white/70 leading-relaxed max-w-[320px]">
-            {slide.caption}
-          </p>
+        <div className="relative" style={{ minHeight: '120px' }}>
+          {SLIDES.map((s, i) => (
+            <div
+              key={i}
+              className="absolute inset-0 transition-opacity duration-500"
+              style={{ opacity: i === idx ? 1 : 0, pointerEvents: i === idx ? 'auto' : 'none' }}
+            >
+              <span className="inline-block text-[10px] font-bold text-white/60 uppercase tracking-[0.2em] mb-3">
+                {s.tag}
+              </span>
+              <h2 className="text-[26px] font-bold text-white leading-tight whitespace-pre-line mb-3">
+                {s.title}
+              </h2>
+              <p className="text-[14px] text-white/70 leading-relaxed max-w-[320px]">
+                {s.caption}
+              </p>
+            </div>
+          ))}
         </div>
 
-        {/* Dot indicators */}
-        <div className="flex items-center gap-2 mt-6">
+        {/* Dot indicators — larger hit target, pill for active */}
+        <div className="flex items-center gap-2 mt-8">
           {SLIDES.map((_, i) => (
             <button
               key={i}
-              onClick={() => { setVisible(false); setTimeout(() => { setIdx(i); setVisible(true); }, 400); }}
-              className="rounded-full bg-white transition-all duration-300"
-              style={{ width: i === idx ? '22px' : '6px', height: '6px', opacity: i === idx ? 1 : 0.35 }}
+              onClick={() => goTo(i)}
+              aria-label={`Go to slide ${i + 1}`}
+              className="rounded-full bg-white transition-all duration-300 focus:outline-none"
+              style={{
+                width:   i === idx ? '24px' : '8px',
+                height:  '8px',
+                opacity: i === idx ? 1 : 0.4,
+              }}
             />
           ))}
         </div>
@@ -135,7 +143,7 @@ export default function Login() {
     <div className="min-h-screen flex bg-white" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
       <LeftPanel />
 
-      {/* ── Right form ─────────────────────────────────────────── */}
+      {/* Right form */}
       <div className="flex-1 flex flex-col">
         <div className="flex items-center justify-between px-8 py-5 border-b border-gray-100">
           <Link to="/" className="lg:hidden font-bold text-gray-900">EvalAI</Link>
