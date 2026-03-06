@@ -87,7 +87,7 @@ export default function StudentDashboard() {
       <div className="p-6 space-y-6">
         {/* Welcome */}
         <div>
-          <div className="text-xl font-bold text-gray-900">Good {greeting()}, {firstName} 👋</div>
+          <div className="text-xl font-bold text-gray-900">Good {greeting()}, {firstName}</div>
           <div className="text-sm text-gray-400 mt-0.5">Here's a summary of your progress.</div>
           <div className="text-xs text-gray-300 mt-1">{today}</div>
         </div>
