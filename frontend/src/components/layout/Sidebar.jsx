@@ -1,22 +1,20 @@
 import { useContext } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { AuthContext } from "../../context/AuthContext";
-import { useNotifications } from "../../hooks/useNotifications";
-import NotificationBell from "../NotificationBell";
 
 const LECTURER_NAV = [
-  { to: "/lecturer",             label: "Dashboard"     },
-  { to: "/lecturer/assessments", label: "Assessments"   },
-  { to: "/lecturer/grading",     label: "Grading Queue" },
-  { to: "/lecturer/questions",   label: "Question Bank" },
-  { to: "/lecturer/students",    label: "Students"      },
-  { to: "/lecturer/analytics",   label: "Analytics"     },
+  { to: "/lecturer", label: "Dashboard" },
+  { to: "/lecturer/assessments", label: "Assessments" },
+  { to: "/lecturer/grading", label: "Grading Queue" },
+  { to: "/lecturer/questions", label: "Question Bank" },
+  { to: "/lecturer/students", label: "Students" },
+  { to: "/lecturer/analytics", label: "Analytics" },
 ];
 
 const STUDENT_NAV = [
-  { to: "/student",             label: "Dashboard"   },
+  { to: "/student", label: "Dashboard" },
   { to: "/student/assessments", label: "Assessments" },
-  { to: "/student/results",     label: "My Results"  },
+  { to: "/student/results", label: "My Results" },
   { to: "/student/performance", label: "Performance" },
 ];
 
@@ -27,20 +25,18 @@ function getInitials(user) {
       ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
       : parts[0].slice(0, 2).toUpperCase();
   }
-  return (user?.email ?? 'U').slice(0, 2).toUpperCase();
+  return (user?.email ?? "U").slice(0, 2).toUpperCase();
 }
 
 export default function Sidebar() {
   const { user, logout } = useContext(AuthContext);
-  const navigate         = useNavigate();
+  const navigate = useNavigate();
 
-  const navItems    = user?.role === "student" ? STUDENT_NAV : LECTURER_NAV;
-  const initials    = getInitials(user);
+  const navItems = user?.role === "student" ? STUDENT_NAV : LECTURER_NAV;
+  const initials = getInitials(user);
   const displayRole = user?.role === "student" ? "Student" : "Lecturer";
   const displayName = user?.fullName || user?.email || "Guest";
 
-  const { notifications, unreadCount, markRead, markAllRead, clearAll } =
-    useNotifications(user);
 
   const handleLogout = async () => {
     await logout();
@@ -84,21 +80,21 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="mt-auto pt-4">
-        {/* Settings link — lecturer only */}
-        {user?.role === "lecturer" && (
-          <div className="mb-4 pb-4 border-b border-gray-200">
-            <NavLink
-              to="/lecturer/settings"
-              className={({ isActive }) =>
-                `text-sm transition-colors ${
-                  isActive ? "text-gray-900 font-semibold" : "text-gray-500 hover:text-gray-800"
-                }`
-              }
-            >
-              Settings
-            </NavLink>
-          </div>
-        )}
+        {/* Settings — shared route for both lecturer and student */}
+        <div className="mb-4 pb-4 border-b border-gray-200">
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              `text-sm transition-colors ${
+                isActive
+                  ? "text-gray-900 font-semibold"
+                  : "text-gray-500 hover:text-gray-800"
+              }`
+            }
+          >
+            Settings
+          </NavLink>
+        </div>
 
         {/* User strip */}
         <div className="flex items-center gap-2 mb-4">
@@ -106,18 +102,11 @@ export default function Sidebar() {
             {initials}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-800 truncate">{displayName}</p>
+            <p className="text-sm font-semibold text-gray-800 truncate">
+              {displayName}
+            </p>
             <p className="text-xs text-gray-400">{displayRole}</p>
           </div>
-
-          {/* Bell */}
-          <NotificationBell
-            notifications={notifications}
-            unreadCount={unreadCount}
-            markRead={markRead}
-            markAllRead={markAllRead}
-            clearAll={clearAll}
-          />
         </div>
 
         <button

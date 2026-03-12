@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useContext } from "react";
 import {
   BrowserRouter,
   Routes,
@@ -51,7 +51,18 @@ function ProtectedLayout({ requiredRole }) {
   return <ProtectedLayoutInner requiredRole={requiredRole} />;
 }
 
-import { useContext } from "react";
+function AnyRoleLayout() {
+  const { user } = useContext(AuthContext);
+  if (!user) return <Navigate to="/login" replace />;
+  return (
+    <div className="flex min-h-screen bg-gray-100">
+      <Sidebar />
+      <main className="ml-[250px] flex-1 flex flex-col min-h-screen">
+        <Outlet />
+      </main>
+    </div>
+  );
+}
 
 function ProtectedLayoutInner({ requiredRole }) {
   const { user } = useContext(AuthContext);
@@ -65,6 +76,9 @@ function ProtectedLayoutInner({ requiredRole }) {
       />
     );
   }
+
+  // Renders the layout shell for any authenticated user regardless of role.
+  // Used for pages shared between lecturer and student (e.g. /settings).
 
   return (
     <div className="flex min-h-screen bg-gray-100">
@@ -173,7 +187,6 @@ export default function App() {
                 path="/lecturer/analytics"
                 element={<LecturerAnalytics />}
               />
-              <Route path="/lecturer/settings" element={<Settings />} />
             </Route>
 
             {/* Student */}
@@ -190,6 +203,11 @@ export default function App() {
                 path="/student/performance"
                 element={<StudentPerformance />}
               />
+            </Route>
+
+            {/* Shared — accessible to any authenticated role */}
+            <Route element={<AnyRoleLayout />}>
+              <Route path="/settings" element={<Settings />} />
             </Route>
 
             {/* Fallback */}

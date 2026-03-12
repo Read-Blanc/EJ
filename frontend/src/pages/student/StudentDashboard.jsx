@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../supabaseClient';
 import { AuthContext } from '../../context/AuthContext';
+import { useNotifications } from '../../hooks/useNotifications';
 
 function greeting() {
   const h = new Date().getHours();
@@ -14,7 +15,6 @@ const today = new Date().toLocaleDateString('en-GB', {
   weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
 });
 
-// Consistent status badge used across the whole app
 function StatusBadge({ status }) {
   const styles = {
     Graded:  'bg-gray-900 text-white',
@@ -27,6 +27,115 @@ function StatusBadge({ status }) {
   );
 }
 
+// ── Inline Notifications Panel ───────────────────────────────────────────────
+function NotificationsPanel({ notifications, unreadCount, markRead, markAllRead, clearAll }) {
+  const navigate = useNavigate();
+
+  const timeAgoShort = (ts) => {
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 60)    return 'now';
+    if (s < 3600)  return `${Math.floor(s / 60)}m`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h`;
+    return `${Math.floor(s / 86400)}d`;
+  };
+
+  const handleClick = (n) => {
+    markRead(n.id);
+    if (n.href) navigate(n.href);
+  };
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <div className="font-semibold text-gray-900 text-sm">Notifications</div>
+          {unreadCount > 0 && (
+            <span className="w-5 h-5 bg-gray-900 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+              {unreadCount > 9 ? '9+' : unreadCount}
+            </span>
+          )}
+        </div>
+        {notifications.length > 0 && (
+          <button onClick={clearAll} className="text-xs text-gray-400 hover:text-gray-700 transition">
+            Clear all
+          </button>
+        )}
+      </div>
+
+      <div className="max-h-[280px] overflow-y-auto divide-y divide-gray-50">
+        {notifications.length === 0 ? (
+          <div className="px-5 py-8 text-center">
+            <div className="text-2xl mb-2">🔔</div>
+            <p className="text-xs text-gray-400">No notifications yet</p>
+          </div>
+        ) : (
+          notifications.map(n => (
+            <button
+              key={n.id}
+              onClick={() => handleClick(n)}
+              className={`w-full text-left flex items-start gap-3 px-5 py-3 hover:bg-gray-50 transition ${n.read ? 'opacity-60' : ''}`}
+            >
+              <span className="text-base leading-none mt-0.5 shrink-0">{n.icon}</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">{n.title}</div>
+                <div className="text-sm text-gray-800 mt-0.5 leading-snug truncate">{n.body}</div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-[10px] text-gray-400">{timeAgoShort(n.ts)}</span>
+                {!n.read && <span className="w-1.5 h-1.5 rounded-full bg-gray-900" />}
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+
+      {notifications.length > 0 && unreadCount > 0 && (
+        <div className="px-5 py-3 border-t border-gray-100">
+          <button onClick={markAllRead} className="text-xs text-gray-400 hover:text-gray-700 transition">
+            Mark all as read
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Lightweight toast for new arrivals
+function NotificationToast({ notifications }) {
+  const [queue, setQueue] = useState([]);
+
+  useEffect(() => {
+    if (!notifications.length) return;
+    const newest = notifications[0];
+    if (!newest.read && newest.ts > Date.now() - 500) {
+      setQueue(q => [...q, newest.id]);
+      setTimeout(() => setQueue(q => q.filter(x => x !== newest.id)), 4000);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notifications[0]?.id]);
+
+  return (
+    <div className="fixed bottom-6 right-6 flex flex-col gap-2 z-[100] pointer-events-none">
+      {queue.map(tid => {
+        const n = notifications.find(x => x.id === tid);
+        if (!n) return null;
+        return (
+          <div key={tid}
+            className="pointer-events-auto flex items-start gap-3 bg-gray-950 text-white text-sm px-4 py-3 rounded-xl shadow-2xl max-w-[320px]"
+            style={{ animation: 'slideIn 0.25s ease' }}>
+            <span className="text-base leading-none mt-0.5">{n.icon}</span>
+            <div>
+              <div className="font-semibold text-xs text-gray-400 uppercase tracking-wide">{n.title}</div>
+              <div className="mt-0.5 leading-snug">{n.body}</div>
+            </div>
+          </div>
+        );
+      })}
+      <style>{`@keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}`}</style>
+    </div>
+  );
+}
+
 export default function StudentDashboard() {
   const { user } = useContext(AuthContext);
   const navigate = useNavigate();
@@ -36,6 +145,8 @@ export default function StudentDashboard() {
   const [recent,  setRecent]  = useState([]);
 
   const firstName = user?.fullName?.split(' ')[0] ?? user?.email?.split('@')[0] ?? 'there';
+
+  const { notifications, unreadCount, markRead, markAllRead, clearAll } = useNotifications(user);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -81,7 +192,6 @@ export default function StudentDashboard() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Stat cards — monochrome, no random accent colours
   const statCards = [
     {
       label: 'Available',
@@ -119,7 +229,7 @@ export default function StudentDashboard() {
         </nav>
         <button
           onClick={() => navigate('/student/assessments')}
-          className="px-4 py-2 bg-gray-950 text-white text-sm font-semibold rounded-lg hover:bg-gray-800 transition"
+          className="px-4 py-2 bg-gray-900 text-white text-sm font-semibold rounded-md hover:bg-gray-700 transition"
         >
           Take Assessment
         </button>
@@ -133,7 +243,7 @@ export default function StudentDashboard() {
           <div className="text-xs text-gray-300 mt-1">{today}</div>
         </div>
 
-        {/* Stat cards — clean, monochrome, no colored top borders */}
+        {/* Stat cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {statCards.map(s => (
             <div key={s.label} className="bg-white border border-gray-200 rounded-xl p-5">
@@ -147,73 +257,96 @@ export default function StudentDashboard() {
           ))}
         </div>
 
-        {/* Recent submissions + Quick actions */}
+        {/* Main content + Notifications */}
         <div className="grid grid-cols-3 gap-4">
-          {/* Recent submissions */}
-          <div className="col-span-2 bg-white border border-gray-200 rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-              <div className="font-semibold text-gray-900 text-sm">Recent Submissions</div>
-              <button
-                onClick={() => navigate('/student/results')}
-                className="text-xs text-gray-500 hover:text-gray-900 transition font-medium"
-              >
-                View all →
-              </button>
-            </div>
-            {loading ? (
-              <div className="p-6 text-center text-sm text-gray-400">Loading…</div>
-            ) : recent.length === 0 ? (
-              <div className="p-6 text-center text-sm text-gray-400">
-                No submissions yet. Take an assessment to get started.
+          {/* Recent submissions — spans 2 cols */}
+          <div className="col-span-2 space-y-4">
+            {/* Recent submissions */}
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                <div className="font-semibold text-gray-900 text-sm">Recent Submissions</div>
+                <button
+                  onClick={() => navigate('/student/results')}
+                  className="text-xs text-gray-500 hover:text-gray-900 transition font-medium"
+                >
+                  View all →
+                </button>
               </div>
-            ) : (
-              <div className="divide-y divide-gray-50">
-                {recent.map(r => (
-                  <div
-                    key={r.id}
-                    onClick={() => navigate(`/student/results/${r.id}`, { state: { submission: r } })}
-                    className="flex items-center justify-between px-5 py-3 hover:bg-gray-50 cursor-pointer transition"
-                  >
-                    <div>
-                      <div className="text-sm font-medium text-gray-800">{r.title}</div>
-                      <div className="text-xs text-gray-400">{r.topic || 'No topic'} · {r.date}</div>
+              {loading ? (
+                <div className="divide-y divide-gray-50">
+                  {[...Array(3)].map((_, i) => (
+                    <div key={i} className="flex items-center justify-between px-5 py-3">
+                      <div className="space-y-1.5 flex-1">
+                        <div className="h-3 w-1/2 bg-gray-100 rounded animate-pulse" />
+                        <div className="h-2.5 w-1/3 bg-gray-100 rounded animate-pulse" />
+                      </div>
                     </div>
-                    <StatusBadge status={r.status} />
-                  </div>
+                  ))}
+                </div>
+              ) : recent.length === 0 ? (
+                <div className="p-6 text-center text-sm text-gray-400">
+                  No submissions yet. Take an assessment to get started.
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {recent.map(r => (
+                    <div
+                      key={r.id}
+                      onClick={() => navigate(`/student/results/${r.id}`, { state: { submission: r } })}
+                      className="flex items-center justify-between px-5 py-3 hover:bg-gray-50 cursor-pointer transition"
+                    >
+                      <div>
+                        <div className="text-sm font-medium text-gray-800">{r.title}</div>
+                        <div className="text-xs text-gray-400">{r.topic || 'No topic'} · {r.date}</div>
+                      </div>
+                      <StatusBadge status={r.status} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Quick actions */}
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-100">
+                <div className="font-semibold text-gray-900 text-sm">Quick Actions</div>
+              </div>
+              <div className="p-3 space-y-1">
+                {[
+                  { label: 'Take Assessment', desc: 'Start an available test',  to: '/student/assessments',
+                    icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> },
+                  { label: 'Past Results',    desc: 'View graded submissions', to: '/student/results',
+                    icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> },
+                  { label: 'Performance',     desc: 'Your score trends',        to: '/student/performance',
+                    icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
+                ].map(a => (
+                  <button key={a.label} onClick={() => navigate(a.to)}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 transition text-left group">
+                    <div className="w-7 h-7 rounded-md bg-gray-100 flex items-center justify-center text-gray-500 group-hover:bg-gray-900 group-hover:text-white transition shrink-0">
+                      {a.icon}
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-gray-800">{a.label}</div>
+                      <div className="text-xs text-gray-400">{a.desc}</div>
+                    </div>
+                  </button>
                 ))}
               </div>
-            )}
+            </div>
           </div>
 
-          {/* Quick actions */}
-          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-            <div className="px-5 py-4 border-b border-gray-100">
-              <div className="font-semibold text-gray-900 text-sm">Quick Actions</div>
-            </div>
-            <div className="p-3 space-y-1">
-              {[
-                { label: 'Take Assessment', desc: 'Start an available test',  to: '/student/assessments', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> },
-                { label: 'Past Results',    desc: 'View graded submissions', to: '/student/results',      icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> },
-                { label: 'Performance',     desc: 'Your score trends',        to: '/student/performance',  icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
-              ].map(qa => (
-                <button
-                  key={qa.label}
-                  onClick={() => navigate(qa.to)}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-50 transition text-left"
-                >
-                  <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 shrink-0">
-                    {qa.icon}
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-gray-800">{qa.label}</div>
-                    <div className="text-xs text-gray-400">{qa.desc}</div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* Notifications — inline */}
+          <NotificationsPanel
+            notifications={notifications}
+            unreadCount={unreadCount}
+            markRead={markRead}
+            markAllRead={markAllRead}
+            clearAll={clearAll}
+          />
         </div>
       </div>
+
+      <NotificationToast notifications={notifications} />
     </div>
   );
 }

@@ -58,6 +58,7 @@ export default function GradingDetail() {
   const [aiScoring, setAiScoring] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
+  const [assessmentId, setAssessmentId] = useState(null);
 
   // If no submission from state, fetch it
   useEffect(() => {
@@ -97,6 +98,12 @@ export default function GradingDetail() {
         "id, answer_text, marks_awarded, ai_score, questions(id, text, marks, sample_answer, order_index)",
       )
       .eq("submission_id", subId);
+    const { data: sub } = await supabase
+      .from("submissions")
+      .select("assessment_id")
+      .eq("id", subId)
+      .single();
+    setAssessmentId(sub?.assessment_id ?? null);
 
     if (error || !data) {
       setAnswers([]);
@@ -213,7 +220,7 @@ export default function GradingDetail() {
         No submission selected.{" "}
         <button
           onClick={() => navigate("/lecturer/grading")}
-          className="ml-2 text-indigo-600 underline"
+          className="ml-2 text-gray-700 underline hover:text-gray-900"
         >
           Return to queue
         </button>
@@ -374,7 +381,7 @@ export default function GradingDetail() {
                         </span>
                         <div className="flex items-center gap-3">
                           {a.ai_score !== null && (
-                            <span className="text-xs font-semibold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-full">
+                            <span className="text-xs font-semibold text-gray-600 bg-gray-100 px-2 py-1 rounded-full">
                               AI similarity: {Math.round(a.ai_score * 100)}%
                             </span>
                           )}
@@ -383,7 +390,7 @@ export default function GradingDetail() {
                           </span>
                         </div>
                       </div>
-                      <div className="bg-gray-50 border-l-4 border-indigo-400 rounded-r-lg p-4">
+                      <div className="bg-gray-50 border-l-4 border-gray-300 rounded-r-lg p-4">
                         {a.answer_text ? (
                           a.answer_text.split("\n\n").map((para, i) => (
                             <p
@@ -420,7 +427,7 @@ export default function GradingDetail() {
                                 [a.id]: e.target.value,
                               }))
                             }
-                            className="w-20 border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                            className="w-20 border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
                           />
                           <span className="text-xs text-gray-400">
                             / {a.questions?.marks ?? 0}
@@ -470,12 +477,19 @@ export default function GradingDetail() {
                 <div className="text-sm font-semibold text-gray-900 mb-3">
                   AI Grading
                 </div>
+                {assessmentId && answers.length > 0 && (
+                  <PlagiarismPanel
+                    assessmentId={assessmentId}
+                    currentSubId={submission?.id ?? id}
+                    answers={answers}
+                  />
+                )}
                 {!overrideMode ? (
                   <>
                     <button
                       onClick={handleRunAI}
                       disabled={aiScoring}
-                      className="w-full py-2.5 bg-indigo-500 text-white text-sm font-semibold rounded-md hover:bg-indigo-600 transition disabled:opacity-50 disabled:cursor-not-allowed mb-2"
+                      className="w-full py-2.5 bg-gray-900 text-white text-sm font-semibold rounded-md hover:bg-gray-700 transition disabled:opacity-50 disabled:cursor-not-allowed mb-2"
                     >
                       {aiScoring
                         ? "Running AI…"
